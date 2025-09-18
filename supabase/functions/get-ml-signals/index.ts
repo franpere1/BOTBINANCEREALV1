@@ -157,59 +157,54 @@ serve(async (req) => {
       // --- Dynamic Signal and Confidence Logic ---
       let signal: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
       let confidence = 0;
+      let rawScore = 0; // Ranges from -100 (strong sell) to 100 (strong buy)
 
-      // Base conditions for BUY/SELL
-      const isBuySignal = rsi < 40 && macd > macdSignal && currentPrice > ma20;
-      const isSellSignal = rsi > 60 && macd < macdSignal && currentPrice < ma20;
+      // RSI scoring (more extreme RSI values give higher scores)
+      if (rsi < 30) rawScore += 30; // Very oversold
+      else if (rsi < 40) rawScore += 15; // Moderately oversold
+      else if (rsi > 70) rawScore -= 30; // Very overbought
+      else if (rsi > 60) rawScore -= 15; // Moderately overbought
 
-      if (isBuySignal) {
+      // MACD scoring (crossover and histogram direction)
+      if (macd > macdSignal && histMacd > 0) rawScore += 25; // Bullish crossover with positive momentum
+      else if (macd < macdSignal && histMacd < 0) rawScore -= 25; // Bearish crossover with negative momentum
+
+      // Price vs MA20
+      if (currentPrice > ma20) rawScore += 20;
+      else if (currentPrice < ma20) rawScore -= 20;
+
+      // Price vs MA50
+      if (currentPrice > ma50) rawScore += 15;
+      else if (currentPrice < ma50) rawScore -= 15;
+
+      // Bollinger Bands
+      if (currentPrice < lowerBand) rawScore += 10; // Price below lower band (potential bounce up)
+      else if (currentPrice > upperBand) rawScore -= 10; // Price above upper band (potential pullback)
+
+      // Determine signal based on rawScore thresholds
+      if (rawScore >= 20) { // A positive score threshold for BUY
         signal = 'BUY';
-        // Confidence for BUY
-        confidence += Math.min(30, (40 - rsi) * 1.5); // Stronger RSI -> higher confidence (max 30 points)
-        if (macd > macdSignal) {
-          confidence += Math.min(25, (macd - macdSignal) * 1000); // Stronger MACD crossover (max 25 points)
-        }
-        if (currentPrice > ma20) {
-          confidence += Math.min(20, ((currentPrice - ma20) / ma20) * 100 * 10); // Price above MA20 (max 20 points)
-        }
-        if (currentPrice > ma50) {
-          confidence += Math.min(15, ((currentPrice - ma50) / ma50) * 100 * 10); // Price above MA50 (max 15 points)
-        }
-        if (currentPrice < lowerBand) { // Price touching or below lower BB
-          confidence += 10; // Additional confidence for being oversold
-        }
-      } else if (isSellSignal) {
+      } else if (rawScore <= -20) { // A negative score threshold for SELL
         signal = 'SELL';
-        // Confidence for SELL
-        confidence += Math.min(30, (rsi - 60) * 1.5); // Stronger RSI -> higher confidence (max 30 points)
-        if (macd < macdSignal) {
-          confidence += Math.min(25, (macdSignal - macd) * 1000); // Stronger MACD crossover (max 25 points)
-        }
-        if (currentPrice < ma20) {
-          confidence += Math.min(20, ((ma20 - currentPrice) / ma20) * 100 * 10); // Price below MA20 (max 20 points)
-        }
-        if (currentPrice < ma50) {
-          confidence += Math.min(15, ((ma50 - currentPrice) / ma50) * 100 * 10); // Price below MA50 (max 15 points)
-        }
-        if (currentPrice > upperBand) { // Price touching or above upper BB
-          confidence += 10; // Additional confidence for being overbought
-        }
       } else {
         signal = 'HOLD';
-        // Confidence for HOLD (reflects indecision or consolidation)
-        if (rsi >= 40 && rsi <= 60) {
-          confidence += Math.min(20, (10 - Math.abs(50 - rsi)) * 2); // Higher confidence if RSI is near 50
-        }
-        if (currentPrice > lowerBand && currentPrice < upperBand) { // Price within Bollinger Bands
-          confidence += 10;
-        }
-        // If MACD lines are very close
-        if (Math.abs(macd - macdSignal) < 0.01) {
-          confidence += 10;
-        }
       }
 
-      // Cap confidence at 100 and ensure it's not negative
+      // Map rawScore to confidence [0-100] based on the determined signal
+      if (signal === 'BUY') {
+        // Scale rawScore from [20, 100] to confidence [50, 100]
+        // Ensure minimum confidence for a BUY signal is 50
+        confidence = 50 + Math.max(0, (rawScore - 20) / 80) * 50;
+      } else if (signal === 'SELL') {
+        // Scale rawScore from [-100, -20] to confidence [0, 49.9]
+        // Ensure maximum confidence for a SELL signal is 49.9
+        confidence = 49.9 - Math.max(0, (Math.abs(rawScore) - 20) / 80) * 49.9;
+      } else { // HOLD
+        // Scale rawScore from [-20, 20] to confidence [40, 60] (centered around 50)
+        confidence = 50 + (rawScore / 20) * 10;
+      }
+
+      // Final capping to ensure confidence is within [0, 100]
       confidence = Math.max(0, Math.min(100, confidence));
 
       signalsData.push({
