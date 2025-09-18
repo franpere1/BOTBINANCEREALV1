@@ -191,7 +191,8 @@ const SignalsTrading = () => {
     }
   };
 
-  const buySignals70Plus = signals?.filter(s => s.signal === 'BUY' && s.confidence >= 70) || [];
+  // Filtrar activos con señal de COMPRA y al menos 50% de confianza para mostrar en el diálogo
+  const buySignalsForDisplay = signals?.filter(s => s.signal === 'BUY' && s.confidence >= 50) || [];
 
   return (
     <div className="space-y-8">
@@ -216,6 +217,10 @@ const SignalsTrading = () => {
               <DialogTitle className="text-yellow-400">Iniciar Operaciones por Señal</DialogTitle>
               <DialogDescription className="text-gray-400">
                 Configura los parámetros para iniciar operaciones de compra basadas en señales de ML.
+                <br />
+                <span className="text-sm text-gray-500">
+                  (Solo se ejecutarán operaciones para señales de COMPRA con 70% o más de confianza, aunque aquí se muestren desde 50%.)
+                </span>
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
@@ -251,10 +256,10 @@ const SignalsTrading = () => {
                   name="selectedAssets"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-gray-300">Activos para Operar (BUY >= 70% Confianza)</FormLabel>
+                      <FormLabel className="text-gray-300">Activos para Operar (BUY >= 50% Confianza)</FormLabel> {/* Etiqueta actualizada */}
                       <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
-                        {buySignals70Plus.length > 0 ? (
-                          buySignals70Plus.map((signal) => (
+                        {buySignalsForDisplay.length > 0 ? (
+                          buySignalsForDisplay.map((signal) => (
                             <FormField
                               key={signal.asset}
                               control={form.control}
@@ -286,7 +291,7 @@ const SignalsTrading = () => {
                             />
                           ))
                         ) : (
-                          <p className="text-gray-500 col-span-2">No hay activos con señal de COMPRA >= 70% de confianza en este momento.</p>
+                          <p className="text-gray-500 col-span-2">No hay activos con señal de COMPRA >= 50% de confianza en este momento.</p> {/* Mensaje actualizado */}
                         )}
                       </div>
                       <FormMessage />
