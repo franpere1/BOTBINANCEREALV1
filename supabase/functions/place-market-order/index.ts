@@ -61,7 +61,14 @@ serve(async (req) => {
     }
 
     const quantityFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+    if (!quantityFilter) {
+      throw new Error(`Filtro LOT_SIZE no encontrado para el símbolo ${pair}.`);
+    }
+
     const minNotionalFilter = symbolInfo.filters.find((f: any) => f.filterType === 'MIN_NOTIONAL');
+    if (!minNotionalFilter) {
+      throw new Error(`Filtro MIN_NOTIONAL no encontrado para el símbolo ${pair}.`);
+    }
 
     const stepSize = parseFloat(quantityFilter.stepSize);
     const minQty = parseFloat(quantityFilter.minQty);
