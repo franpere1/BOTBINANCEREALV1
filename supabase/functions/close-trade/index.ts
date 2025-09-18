@@ -9,8 +9,9 @@ const corsHeaders = {
 
 // Helper para ajustar la cantidad a la precisión del stepSize de Binance
 const adjustQuantity = (qty: number, step: number) => {
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  return parseFloat(qty.toFixed(precision));
+  // Calcula el número de pasos y luego multiplica por el stepSize para asegurar la precisión
+  const numSteps = Math.floor(qty / step);
+  return numSteps * step;
 };
 
 serve(async (req) => {
@@ -114,7 +115,7 @@ serve(async (req) => {
       throw new Error(`No hay saldo disponible de ${baseAsset} para vender.`);
     }
     let finalQuantity = parseFloat(assetBalance.free);
-    console.log(`[CLOSE-TRADE] Balance libre de ${baseAsset}: ${finalQuantity}`);
+    console.log(`[CLOSE-TRADE] Balance libre de ${baseAsset} (antes de ajustar): ${finalQuantity}`);
 
     // 4. Obtener el precio actual para verificar MIN_NOTIONAL en ventas
     const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
@@ -128,7 +129,7 @@ serve(async (req) => {
 
     // 5. Validar y ajustar quantity
     let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
-    console.log(`[CLOSE-TRADE] Cantidad final antes de ajustar: ${finalQuantity}, Cantidad ajustada (stepSize): ${adjustedQuantity}`);
+    console.log(`[CLOSE-TRADE] Cantidad ajustada (usando stepSize ${stepSize}): ${adjustedQuantity}`);
 
     if (adjustedQuantity < minQty) {
       console.error(`[CLOSE-TRADE] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
