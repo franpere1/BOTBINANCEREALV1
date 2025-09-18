@@ -12,18 +12,6 @@ function calculateSMA(data: number[], period: number): number {
   return sum / period;
 }
 
-// Helper function to calculate the last EMA value
-function calculateLastEMA(data: number[], period: number): number {
-  if (data.length < period) return 0;
-  const k = 2 / (period + 1);
-  let currentEMA = calculateSMA(data.slice(0, period), period); // Initial SMA for the first EMA
-
-  for (let i = period; i < data.length; i++) {
-    currentEMA = (data[i] - currentEMA) * k + currentEMA;
-  }
-  return currentEMA;
-}
-
 // Helper function to calculate a series of EMA values
 function calculateEMASeries(data: number[], period: number): number[] {
   if (data.length < period) return [];
@@ -95,7 +83,7 @@ serve(async (req) => {
   }
 
   try {
-    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT']; // Cambiado USDCUSDT por TRXUSDT
+    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'USDCUSDT']; // USDCUSDT añadido de nuevo
     const signalsData = [];
 
     for (const asset of assets) {

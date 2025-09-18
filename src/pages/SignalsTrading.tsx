@@ -4,11 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, TrendingUp, TrendingDown, PauseCircle } from "lucide-react"; // Eliminado Play
+import { AlertCircle, TrendingUp, TrendingDown, PauseCircle } from "lucide-react";
 import { showError, showSuccess } from '@/utils/toast';
-// Eliminado Button
 import { useAuth } from '@/context/AuthProvider';
-// Eliminado useState
 import ActiveSignalTrades from '@/components/ActiveSignalTrades';
 
 interface SignalData {
@@ -38,7 +36,6 @@ const fetchMlSignals = async (): Promise<SignalData[]> => {
 const SignalsTrading = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  // Eliminado const [isActivating, setIsActivating] = useState<string | null>(null);
 
   const { data: signals, isLoading, isError } = useQuery<SignalData[], Error>({
     queryKey: ['mlSignals'],
@@ -110,8 +107,6 @@ const SignalsTrading = () => {
     }
   };
 
-  // Eliminado handleActivateTrade function
-
   return (
     <div className="space-y-8">
       <div className="text-center mb-8">
@@ -135,7 +130,7 @@ const SignalsTrading = () => {
             </CardHeader>
             <CardContent className="text-sm space-y-1">
               <p className="text-gray-400">Confianza: <span className="text-white font-semibold">{signal.confidence.toFixed(1)}%</span></p>
-              <p className="text-gray-400">Precio: <span className="text-white font-semibold">${signal.price.toFixed(signal.asset === 'USDCUSDT' || signal.asset === 'ADAUSDT' ? 2 : 4)}</span></p>
+              <p className="text-gray-400">Precio: <span className="text-white font-semibold">${signal.price.toFixed(4)}</span></p> {/* Ajustado a 4 decimales */}
               <p className="text-gray-400">RSI: <span className="text-white font-semibold">{signal.rsi.toFixed(2)}</span></p>
               <p className="text-gray-400">MA20: <span className="text-white font-semibold">${signal.ma20.toFixed(4)}</span></p>
               <p className="text-gray-400">MA50: <span className="text-white font-semibold">${signal.ma50.toFixed(4)}</span></p>
@@ -146,8 +141,6 @@ const SignalsTrading = () => {
               <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
               <p className="text-gray-400">Volatilidad: <span className="text-white font-semibold">{signal.volatility.toFixed(2)}%</span></p>
               <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
-              
-              {/* Eliminado el botón de activación de trade */}
             </CardContent>
           </Card>
         ))}
