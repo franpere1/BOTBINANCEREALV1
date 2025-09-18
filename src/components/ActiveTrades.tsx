@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
-import { useState } from 'react'; // Eliminado useEffect
+import { useState } from 'react';
 
 interface Trade {
   id: string;
@@ -16,7 +16,7 @@ interface Trade {
   asset_amount: number;
   purchase_price: number;
   target_price: number;
-  take_profit_percentage: number;
+  take_profit_percentage: number; // Asegurarse de que este campo esté presente
   created_at: string;
 }
 
@@ -82,8 +82,6 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
     }
   };
 
-  // Eliminado el useEffect que monitoreaba el take-profit, ahora lo hace la Edge Function
-
   const pnl = currentPrice ? ((currentPrice - trade.purchase_price) / trade.purchase_price) * 100 : 0;
   const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
 
@@ -93,6 +91,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
       <TableCell className="text-gray-300">{trade.purchase_price.toFixed(4)}</TableCell>
       <TableCell className="text-yellow-400">{trade.target_price.toFixed(4)}</TableCell>
+      <TableCell className="text-gray-300">{trade.take_profit_percentage.toFixed(2)}%</TableCell> {/* Nueva celda */}
       <TableCell className="text-white">
         {isLoadingPrice ? <Skeleton className="h-4 w-16" /> : currentPrice?.toFixed(4)}
       </TableCell>
@@ -145,6 +144,7 @@ const ActiveTrades = () => {
           <TableHead className="text-white">Fecha Apertura</TableHead>
           <TableHead className="text-white">Precio Compra</TableHead>
           <TableHead className="text-white">Precio Objetivo</TableHead>
+          <TableHead className="text-white">Objetivo (%)</TableHead> {/* Nueva cabecera */}
           <TableHead className="text-white">Precio Actual</TableHead>
           <TableHead className="text-white">Ganancia/Pérdida</TableHead>
           <TableHead className="text-right text-white">Acción</TableHead>
