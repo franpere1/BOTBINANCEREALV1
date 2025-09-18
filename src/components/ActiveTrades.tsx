@@ -35,7 +35,7 @@ const fetchTickerPrice = async (pair: string) => {
   const { data, error } = await supabase.functions.invoke('get-ticker-price', {
     body: { pair },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(data?.error || error.message);
   return parseFloat(data.price);
 };
 
@@ -52,14 +52,20 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
     setIsClosing(true);
     try {
       // 1. Ejecutar la venta
-      const { data: sellOrder, error: sellError } = await supabase.functions.invoke('place-market-order', {
+      const { data: sellOrder, error: functionError } = await supabase.functions.invoke('place-market-order', {
         body: {
           pair: trade.pair,
           side: 'SELL',
           quantity: trade.asset_amount,
         },
       });
-      if (sellError) throw sellError;
+
+      if (functionError) {
+        throw functionError;
+      }
+      if (sellOrder.error) { // Verificar si la función Edge devolvió un error en el cuerpo
+        throw new Error(sellOrder.error);
+      }
 
       // 2. Actualizar la operación a 'completed'
       const { error: updateError } = await supabase

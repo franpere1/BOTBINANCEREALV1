@@ -7,6 +7,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper para ajustar la cantidad a la precisión del stepSize de Binance
+const adjustQuantity = (qty: number, step: number) => {
+  const precision = Math.max(0, -Math.floor(Math.log10(step)));
+  return parseFloat(qty.toFixed(precision));
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -40,12 +46,42 @@ serve(async (req) => {
     const { pair, side, quantity, quoteOrderQty } = await req.json();
     if (!pair || !side) throw new Error('Los parámetros "pair" y "side" son obligatorios.');
 
+    // Obtener información de intercambio para precisión y límites
+    const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${pair}`;
+    const exchangeInfoResponse = await fetch(exchangeInfoUrl);
+    const exchangeInfoData = await exchangeInfoResponse.json();
+
+    if (!exchangeInfoResponse.ok || exchangeInfoData.code) {
+      throw new Error(`Error al obtener información de intercambio: ${exchangeInfoData.msg || 'Error desconocido'}`);
+    }
+
+    const symbolInfo = exchangeInfoData.symbols.find((s: any) => s.symbol === pair);
+    if (!symbolInfo) {
+      throw new Error(`Información de intercambio no encontrada para el símbolo ${pair}`);
+    }
+
+    const quantityFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+    const minNotionalFilter = symbolInfo.filters.find((f: any) => f.filterType === 'MIN_NOTIONAL');
+
+    const stepSize = parseFloat(quantityFilter.stepSize);
+    const minQty = parseFloat(quantityFilter.minQty);
+    const minNotional = parseFloat(minNotionalFilter.minNotional);
+
     let queryString = `symbol=${pair}&side=${side.toUpperCase()}&type=MARKET&timestamp=${Date.now()}`;
     
     if (side.toUpperCase() === 'BUY' && quoteOrderQty) {
+      // Validar y ajustar quoteOrderQty
+      if (quoteOrderQty < minNotional) {
+        throw new Error(`La cantidad de la orden en USDT (${quoteOrderQty}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
+      }
       queryString += `&quoteOrderQty=${quoteOrderQty}`;
     } else if (side.toUpperCase() === 'SELL' && quantity) {
-      queryString += `&quantity=${quantity}`;
+      // Validar y ajustar quantity
+      let adjustedQuantity = adjustQuantity(quantity, stepSize);
+      if (adjustedQuantity < minQty) {
+        throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
+      }
+      queryString += `&quantity=${adjustedQuantity}`;
     } else {
       throw new Error('Parámetros de cantidad inválidos para la orden.');
     }
@@ -59,6 +95,8 @@ serve(async (req) => {
     });
 
     const responseData = await response.json();
+    console.log('Binance API Response:', responseData); // Log de la respuesta de Binance
+
     if (!response.ok) {
       throw new Error(`Error de Binance: ${responseData.msg || 'Error desconocido'}`);
     }
@@ -68,11 +106,12 @@ serve(async (req) => {
       status: 200,
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error en la Edge Function place-market-order:', error);
+    // Siempre devolver 200, pero con un campo de error en el cuerpo
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 200, 
     });
   }
 });

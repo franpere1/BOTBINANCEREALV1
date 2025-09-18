@@ -53,14 +53,20 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
     setIsClosing(true);
     try {
       // 1. Ejecutar la venta
-      const { data: sellOrder, error: sellError } = await supabase.functions.invoke('place-market-order', {
+      const { data: sellOrder, error: functionError } = await supabase.functions.invoke('place-market-order', {
         body: {
           pair: trade.pair,
           side: 'SELL',
           quantity: trade.asset_amount,
         },
       });
-      if (sellError) throw sellError;
+
+      if (functionError) {
+        throw functionError;
+      }
+      if (sellOrder.error) { // Verificar si la función Edge devolvió un error en el cuerpo
+        throw new Error(sellOrder.error);
+      }
 
       // 2. Actualizar la operación a 'completed'
       const { error: updateError } = await supabase
