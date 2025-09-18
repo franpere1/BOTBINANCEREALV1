@@ -17,6 +17,7 @@ interface Trade {
   purchase_price: number;
   target_price: number;
   take_profit_percentage: number;
+  created_at: string;
 }
 
 const fetchActiveTrades = async (userId: string) => {
@@ -24,7 +25,8 @@ const fetchActiveTrades = async (userId: string) => {
     .from('manual_trades')
     .select('*')
     .eq('user_id', userId)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data;
 };
@@ -97,7 +99,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   return (
     <TableRow className="border-gray-700">
       <TableCell className="font-medium text-white">{trade.pair}</TableCell>
-      <TableCell className="text-gray-300">{trade.usdt_amount.toFixed(2)} USDT</TableCell>
+      <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
       <TableCell className="text-gray-300">{trade.purchase_price.toFixed(4)}</TableCell>
       <TableCell className="text-yellow-400">{trade.target_price.toFixed(4)}</TableCell>
       <TableCell className="text-white">
@@ -148,7 +150,7 @@ const ActiveTrades = () => {
       <TableHeader>
         <TableRow className="border-gray-700 hover:bg-gray-800">
           <TableHead className="text-white">Par</TableHead>
-          <TableHead className="text-white">Inversión</TableHead>
+          <TableHead className="text-white">Fecha Apertura</TableHead>
           <TableHead className="text-white">Precio Compra</TableHead>
           <TableHead className="text-white">Precio Objetivo</TableHead>
           <TableHead className="text-white">Precio Actual</TableHead>
