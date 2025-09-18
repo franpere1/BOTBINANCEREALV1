@@ -32,7 +32,13 @@ const BalanceDisplay = () => {
     if (functionError) {
       console.error('Error invoking function:', functionError);
       const errorMessage = data?.error || functionError.message;
-      setError(`Error al obtener el balance: ${errorMessage}`);
+      
+      let displayError = `Error al obtener el balance: ${errorMessage}`;
+      if (errorMessage && errorMessage.includes('restricted location')) {
+        displayError = "Error de Ubicación Restringida: Binance está bloqueando las solicitudes desde la región del servidor actual (EE. UU.). Para solucionar esto, el proyecto de Supabase debe estar en una región no restringida, como Europa o Asia.";
+      }
+      
+      setError(displayError);
       showError('No se pudo obtener el balance.');
     } else {
       setBalances(data);
