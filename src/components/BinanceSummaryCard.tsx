@@ -130,6 +130,8 @@ const BinanceSummaryCard = () => {
   const pnlColor = floatingPnL >= 0 ? 'text-green-400' : 'text-red-400';
   const PnLIcon = floatingPnL >= 0 ? TrendingUp : TrendingDown;
 
+  const floatingPnLPercentage = capitalUsed > 0 ? (floatingPnL / capitalUsed) * 100 : 0;
+
   return (
     <Card className="w-full max-w-[300px] bg-gray-800 border-gray-700 text-white">
       <CardHeader className="pb-2">
@@ -146,6 +148,9 @@ const BinanceSummaryCard = () => {
         <p className={`flex items-center ${pnlColor}`}>
           <PnLIcon className="h-4 w-4 mr-1" />
           P/L Flotante: <span className="font-semibold ml-1">${floatingPnL.toFixed(2)}</span>
+          {capitalUsed > 0 && (
+            <span className="ml-1 text-xs">({floatingPnLPercentage.toFixed(2)}%)</span>
+          )}
         </p>
       </CardContent>
     </Card>
