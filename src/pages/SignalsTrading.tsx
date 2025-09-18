@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play } from "lucide-react";
+import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play, Trash2 } from "lucide-react";
 import { showError, showSuccess } from '@/utils/toast';
 import { useAuth } from '@/context/AuthProvider';
 import ActiveSignalTrades from '@/components/ActiveSignalTrades';
@@ -36,6 +36,19 @@ interface SignalData {
   lastUpdate: string;
 }
 
+// Reutilizar la interfaz de ActiveSignalTrades para consistencia
+interface SignalTrade {
+  id: string;
+  pair: string;
+  usdt_amount: number;
+  asset_amount: number | null;
+  purchase_price: number | null;
+  target_price: number | null;
+  take_profit_percentage: number;
+  created_at: string;
+  status: 'active' | 'paused' | 'completed' | 'error' | 'awaiting_buy_signal';
+}
+
 const formSchema = z.object({
   usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
   takeProfitPercentage: z.coerce.number().positive("El porcentaje debe ser mayor que 0."),
@@ -48,17 +61,45 @@ const fetchMlSignals = async (): Promise<SignalData[]> => {
   return data as SignalData[];
 };
 
+// Reutilizar la función de ActiveSignalTrades para obtener las operaciones del usuario
+const fetchUserSignalTrades = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('signal_trades')
+    .select('*')
+    .eq('user_id', userId)
+    .in('status', ['active', 'paused', 'awaiting_buy_signal'])
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
 const SignalsTrading = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmittingBulkTrades, setIsSubmittingBulkTrades] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false); // Para el estado de carga de los botones de acción en las tarjetas
 
   const { data: signals, isLoading, isError } = useQuery<SignalData[], Error>({
     queryKey: ['mlSignals'],
     queryFn: fetchMlSignals,
     refetchInterval: 15000, // Refrescar cada 15 segundos
   });
+
+  const { data: userSignalTrades, isLoading: isLoadingUserTrades } = useQuery<SignalTrade[], Error>({
+    queryKey: ['userSignalTrades'],
+    queryFn: () => fetchUserSignalTrades(user!.id),
+    enabled: !!user,
+    refetchInterval: 10000, // Sincronizar con ActiveSignalTrades
+  });
+
+  const userTradesMap = React.useMemo(() => {
+    const map = new Map<string, SignalTrade>();
+    userSignalTrades?.forEach(trade => {
+      map.set(trade.pair, trade);
+    });
+    return map;
+  }, [userSignalTrades]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -77,7 +118,6 @@ const SignalsTrading = () => {
     setIsSubmittingBulkTrades(true);
 
     try {
-      // Llamar a la nueva función Edge para configurar el monitoreo
       const { data: results, error: functionError } = await supabase.functions.invoke('setup-signal-monitoring', {
         body: {
           usdtAmount: values.usdtAmount,
@@ -107,12 +147,41 @@ const SignalsTrading = () => {
       }
 
       queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] }); // Invalidar para actualizar los botones en las tarjetas
       setIsDialogOpen(false);
       form.reset();
     } catch (error: any) {
       showError(`Error general al configurar el monitoreo de señales: ${error.message}`);
     } finally {
       setIsSubmittingBulkTrades(false);
+    }
+  };
+
+  const handleCardAction = async (tradeId: string, actionType: 'delete' | 'close', tradePair: string) => {
+    setIsActionLoading(true);
+    try {
+      if (actionType === 'delete') {
+        const { data, error: functionError } = await supabase.functions.invoke('delete-signal-trade', {
+          body: { tradeId },
+        });
+        if (functionError) throw functionError;
+        if (data.error) throw new Error(data.error);
+        showSuccess(`Monitoreo de ${tradePair} eliminado con éxito.`);
+      } else if (actionType === 'close') {
+        const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
+          body: { tradeId, tradeType: 'signal' },
+        });
+        if (functionError) throw functionError;
+        if (data.error) throw new Error(data.error);
+        showSuccess(`Operación de ${tradePair} cerrada con éxito.`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
+    } catch (error: any) {
+      showError(`Error al procesar la acción para ${tradePair}: ${error.message}`);
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
@@ -139,7 +208,7 @@ const SignalsTrading = () => {
     );
   }
 
-  if (isLoading) {
+  if (isLoading || isLoadingUserTrades) {
     return (
       <div className="space-y-8">
         <div className="flex justify-end">
@@ -185,7 +254,6 @@ const SignalsTrading = () => {
     }
   };
 
-  // Mostrar todos los activos para selección en el diálogo
   const allSignalsForDisplay = signals || [];
 
   return (
@@ -301,41 +369,68 @@ const SignalsTrading = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {signals?.map((signal) => (
-          <Card key={signal.asset} className="bg-gray-800 border-gray-700 text-white">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-2xl text-yellow-400 flex items-center justify-between">
-                {signal.asset}
-                <span className={`text-sm px-3 py-1 rounded-full font-semibold ${
-                  signal.confidence >= 70 ? 'bg-green-600 text-white' : 
-                  signal.confidence >= 50 ? 'bg-yellow-500 text-gray-900' : 
-                  'bg-gray-600 text-gray-300'
-                }`}>
-                  {signal.confidence.toFixed(1)}% Confianza
-                </span>
-              </CardTitle>
-              <CardDescription className={`flex items-center text-xl font-bold ${getSignalColor(signal.signal)} mt-1`}>
-                {getSignalIcon(signal.signal)}
-                {signal.signal}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm space-y-2">
-              <p className="text-gray-400">Precio Actual: <span className="text-white font-semibold">${signal.price.toFixed(4)}</span></p>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                <p className="text-gray-400">RSI: <span className="text-white font-semibold">{signal.rsi.toFixed(2)}</span></p>
-                <p className="text-gray-400">Volatilidad: <span className="text-white font-semibold">{signal.volatility.toFixed(2)}%</span></p>
-                <p className="text-gray-400">MA20: <span className="text-white font-semibold">${signal.ma20.toFixed(4)}</span></p>
-                <p className="text-gray-400">MA50: <span className="text-white font-semibold">${signal.ma50.toFixed(4)}</span></p>
-                <p className="text-gray-400">MACD: <span className="text-white font-semibold">{signal.macd.toFixed(3)}</span></p>
-                <p className="text-gray-400">MACD Señal: <span className="text-white font-semibold">{signal.macdSignal.toFixed(3)}</span></p>
-                <p className="text-gray-400">Hist. MACD: <span className="text-white font-semibold">{signal.histMacd.toFixed(3)}</span></p>
-                <p className="text-gray-400">Banda Superior: <span className="text-white font-semibold">${signal.upperBand.toFixed(4)}</span></p>
-                <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
-              </div>
-              <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
-            </CardContent>
-          </Card>
-        ))}
+        {signals?.map((signal) => {
+          const existingUserTrade = userTradesMap.get(signal.asset);
+          return (
+            <Card key={signal.asset} className="bg-gray-800 border-gray-700 text-white">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-2xl text-yellow-400 flex items-center justify-between">
+                  {signal.asset}
+                  <span className={`text-sm px-3 py-1 rounded-full font-semibold ${
+                    signal.confidence >= 70 ? 'bg-green-600 text-white' : 
+                    signal.confidence >= 50 ? 'bg-yellow-500 text-gray-900' : 
+                    'bg-gray-600 text-gray-300'
+                  }`}>
+                    {signal.confidence.toFixed(1)}% Confianza
+                  </span>
+                </CardTitle>
+                <CardDescription className={`flex items-center text-xl font-bold ${getSignalColor(signal.signal)} mt-1`}>
+                  {getSignalIcon(signal.signal)}
+                  {signal.signal}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="text-sm space-y-2">
+                <p className="text-gray-400">Precio Actual: <span className="text-white font-semibold">${signal.price.toFixed(4)}</span></p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  <p className="text-gray-400">RSI: <span className="text-white font-semibold">{signal.rsi.toFixed(2)}</span></p>
+                  <p className="text-gray-400">Volatilidad: <span className="text-white font-semibold">{signal.volatility.toFixed(2)}%</span></p>
+                  <p className="text-gray-400">MA20: <span className="text-white font-semibold">${signal.ma20.toFixed(4)}</span></p>
+                  <p className="text-gray-400">MA50: <span className="text-white font-semibold">${signal.ma50.toFixed(4)}</span></p>
+                  <p className="text-gray-400">MACD: <span className="text-white font-semibold">{signal.macd.toFixed(3)}</span></p>
+                  <p className="text-gray-400">MACD Señal: <span className="text-white font-semibold">{signal.macdSignal.toFixed(3)}</span></p>
+                  <p className="text-gray-400">Hist. MACD: <span className="text-white font-semibold">{signal.histMacd.toFixed(3)}</span></p>
+                  <p className="text-gray-400">Banda Superior: <span className="text-white font-semibold">${signal.upperBand.toFixed(4)}</span></p>
+                  <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
+                </div>
+                <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
+                {existingUserTrade && (
+                  <div className="mt-4">
+                    {existingUserTrade.status === 'awaiting_buy_signal' && (
+                      <Button
+                        variant="destructive"
+                        className="w-full"
+                        onClick={() => handleCardAction(existingUserTrade.id, 'delete', existingUserTrade.pair)}
+                        disabled={isActionLoading}
+                      >
+                        {isActionLoading ? 'Eliminando...' : <><Trash2 className="h-4 w-4 mr-2" /> Eliminar Monitoreo</>}
+                      </Button>
+                    )}
+                    {(existingUserTrade.status === 'active' || existingUserTrade.status === 'paused') && (
+                      <Button
+                        variant="destructive"
+                        className="w-full"
+                        onClick={() => handleCardAction(existingUserTrade.id, 'close', existingUserTrade.pair)}
+                        disabled={isActionLoading}
+                      >
+                        {isActionLoading ? 'Cerrando Trade...' : <><Trash2 className="h-4 w-4 mr-2" /> Cerrar Trade</>}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <Card className="bg-gray-800 border-gray-700">
