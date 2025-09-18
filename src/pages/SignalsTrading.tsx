@@ -405,26 +405,45 @@ const SignalsTrading = () => {
                 <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
                 {existingUserTrade && (
                   <div className="mt-4">
-                    {existingUserTrade.status === 'awaiting_buy_signal' && (
-                      <Button
-                        variant="destructive"
-                        className="w-full"
-                        onClick={() => handleCardAction(existingUserTrade.id, 'delete', existingUserTrade.pair)}
-                        disabled={isActionLoading}
-                      >
-                        {isActionLoading ? 'Eliminando...' : <><Trash2 className="h-4 w-4 mr-2" /> Eliminar Monitoreo</>}
-                      </Button>
-                    )}
-                    {(existingUserTrade.status === 'active' || existingUserTrade.status === 'paused') && (
-                      <Button
-                        variant="destructive"
-                        className="w-full"
-                        onClick={() => handleCardAction(existingUserTrade.id, 'close', existingUserTrade.pair)}
-                        disabled={isActionLoading}
-                      >
-                        {isActionLoading ? 'Cerrando Trade...' : <><Trash2 className="h-4 w-4 mr-2" /> Cerrar Trade</>}
-                      </Button>
-                    )}
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button variant="destructive" className="w-full" disabled={isActionLoading}>
+                          {isActionLoading ? 'Cargando...' : <Trash2 className="h-4 w-4" />}
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
+                        <DialogHeader>
+                          <DialogTitle className="text-red-400">
+                            {existingUserTrade.status === 'awaiting_buy_signal' ? 'Confirmar Eliminación de Monitoreo' : 'Confirmar Cierre de Operación'}
+                          </DialogTitle>
+                          <DialogDescription className="text-gray-400">
+                            {existingUserTrade.status === 'awaiting_buy_signal'
+                              ? `¿Estás seguro de que quieres eliminar el monitoreo para ${existingUserTrade.pair}? Esto detendrá la búsqueda de señales de compra para este activo.`
+                              : `¿Estás seguro de que quieres cerrar la operación de ${existingUserTrade.pair}? Si la operación está activa, se intentarán vender los activos restantes en Binance.`
+                            }
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setIsActionLoading(false)} disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
+                            Cancelar
+                          </Button>
+                          <Button 
+                            variant="destructive" 
+                            onClick={() => handleCardAction(
+                              existingUserTrade.id, 
+                              existingUserTrade.status === 'awaiting_buy_signal' ? 'delete' : 'close', 
+                              existingUserTrade.pair
+                            )} 
+                            disabled={isActionLoading}
+                          >
+                            {isActionLoading 
+                              ? 'Procesando...' 
+                              : (existingUserTrade.status === 'awaiting_buy_signal' ? 'Eliminar Monitoreo' : 'Cerrar Trade')
+                            }
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 )}
               </CardContent>

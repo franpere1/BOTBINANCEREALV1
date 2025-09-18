@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
 import { useState } from 'react';
-import { AlertCircle, Edit, Trash2, Pause, Play } from 'lucide-react';
+import { AlertCircle, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
@@ -53,10 +53,7 @@ const editFormSchema = z.object({
 
 const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const queryClient = useQueryClient();
-  const [isClosing, setIsClosing] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false); // Para el estado de carga del botón de acción
 
   const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
@@ -65,79 +62,33 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
 
-  const editForm = useForm<z.infer<typeof editFormSchema>>({
-    resolver: zodResolver(editFormSchema),
-    defaultValues: {
-      takeProfitPercentage: trade.take_profit_percentage,
-    },
-  });
-
-  const handleEditSubmit = async (values: z.infer<typeof editFormSchema>) => {
-    setIsUpdatingStatus(true);
+  const handleAction = async () => {
+    setIsActionLoading(true);
     try {
-      const { data, error: functionError } = await supabase.functions.invoke('update-signal-trade', {
-        body: {
-          tradeId: trade.id,
-          takeProfitPercentage: values.takeProfitPercentage,
-        },
-      });
-
-      if (functionError) throw functionError;
-      if (data.error) throw new Error(data.error);
-
-      showSuccess(`¡Operación de ${trade.pair} actualizada con éxito!`);
+      if (trade.status === 'awaiting_buy_signal') {
+        // Eliminar monitoreo
+        const { data, error: functionError } = await supabase.functions.invoke('delete-signal-trade', {
+          body: { tradeId: trade.id },
+        });
+        if (functionError) throw functionError;
+        if (data.error) throw new Error(data.error);
+        showSuccess(`Monitoreo de ${trade.pair} eliminado con éxito.`);
+      } else {
+        // Cerrar trade (activo o pausado)
+        const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
+          body: { tradeId: trade.id, tradeType: 'signal' },
+        });
+        if (functionError) throw functionError;
+        if (data.error) throw new Error(data.error);
+        showSuccess(`Operación de ${trade.pair} cerrada con éxito.`);
+      }
       queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
-      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
-      setIsEditing(false);
-    } catch (error: any) {
-      showError(`Error al actualizar la operación de ${trade.pair}: ${error.message}`);
-    } finally {
-      setIsUpdatingStatus(false);
-    }
-  };
-
-  const handleToggleStatus = async () => {
-    setIsUpdatingStatus(true);
-    const newStatus = trade.status === 'active' ? 'paused' : 'active';
-    try {
-      const { data, error: functionError } = await supabase.functions.invoke('update-signal-trade', {
-        body: {
-          tradeId: trade.id,
-          status: newStatus,
-        },
-      });
-
-      if (functionError) throw functionError;
-      if (data.error) throw new Error(data.error);
-
-      showSuccess(`¡Operación de ${trade.pair} ${newStatus === 'active' ? 'reanudada' : 'pausada'}!`);
-      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
-    } catch (error: any) {
-      showError(`Error al cambiar el estado de la operación de ${trade.pair}: ${error.message}`);
-    } finally {
-      setIsUpdatingStatus(false);
-    }
-  };
-
-  const handleDeleteTrade = async () => {
-    setIsDeleting(true);
-    try {
-      const { data, error: functionError } = await supabase.functions.invoke('delete-signal-trade', {
-        body: {
-          tradeId: trade.id,
-        },
-      });
-
-      if (functionError) throw functionError;
-      if (data.error) throw new Error(data.error);
-
-      showSuccess(`¡Operación de ${trade.pair} eliminada con éxito!`);
-      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
       queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
     } catch (error: any) {
-      showError(`Error al eliminar la operación de ${trade.pair}: ${error.message}`);
+      showError(`Error al procesar la acción para ${trade.pair}: ${error.message}`);
     } finally {
-      setIsDeleting(false);
+      setIsActionLoading(false);
     }
   };
 
@@ -164,80 +115,34 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       }`}>
         {trade.status === 'active' ? 'Activa' : trade.status === 'paused' ? 'Pausada' : 'Esperando Señal'}
       </TableCell>
-      <TableCell className="text-right flex space-x-2 justify-end">
-        {!isAwaitingSignal && ( // Solo mostrar editar/pausar si no está esperando señal
-          <>
-            <Dialog open={isEditing} onOpenChange={setIsEditing}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="text-blue-400 border-blue-400 hover:bg-blue-900" disabled={isUpdatingStatus}>
-                  <Edit className="h-4 w-4" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
-                <DialogHeader>
-                  <DialogTitle className="text-yellow-400">Editar Operación de Señal</DialogTitle>
-                  <DialogDescription className="text-gray-400">
-                    Modifica el porcentaje de ganancia para {trade.pair}.
-                  </DialogDescription>
-                </DialogHeader>
-                <Form {...editForm}>
-                  <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="grid gap-4 py-4">
-                    <FormField
-                      control={editForm.control}
-                      name="takeProfitPercentage"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-300">Nuevo Ganancia Objetivo (%)</FormLabel>
-                          <FormControl>
-                            <Input type="number" step="0.1" {...field} className="bg-gray-700 border-gray-600 text-white" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <DialogFooter className="mt-4">
-                      <Button type="submit" disabled={isUpdatingStatus} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
-                        {isUpdatingStatus ? 'Guardando...' : 'Guardar Cambios'}
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </Form>
-              </DialogContent>
-            </Dialog>
-
-            <Button 
-              variant={trade.status === 'active' ? 'secondary' : 'default'} 
-              size="sm" 
-              onClick={handleToggleStatus} 
-              disabled={isUpdatingStatus}
-              className={trade.status === 'active' ? "bg-yellow-600 hover:bg-yellow-700 text-white" : "bg-green-600 hover:bg-green-700 text-white"}
-            >
-              {isUpdatingStatus ? 'Cargando...' : (trade.status === 'active' ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />)}
-            </Button>
-          </>
-        )}
-
+      <TableCell className="text-right">
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="destructive" size="sm" disabled={isDeleting}>
-              <Trash2 className="h-4 w-4" />
+            <Button variant="destructive" size="sm" disabled={isActionLoading}>
+              {isActionLoading ? 'Cargando...' : <Trash2 className="h-4 w-4" />}
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
             <DialogHeader>
-              <DialogTitle className="text-red-400">Confirmar Eliminación</DialogTitle>
+              <DialogTitle className="text-red-400">
+                {isAwaitingSignal ? 'Confirmar Eliminación de Monitoreo' : 'Confirmar Cierre de Operación'}
+              </DialogTitle>
               <DialogDescription className="text-gray-400">
-                ¿Estás seguro de que quieres eliminar la operación de {trade.pair}?
-                {trade.status === 'active' && " Si la operación está activa, se intentarán vender los activos restantes en Binance."}
-                {isAwaitingSignal && " Esta operación está esperando una señal de compra y será eliminada sin ejecutar ninguna orden en Binance."}
+                {isAwaitingSignal
+                  ? `¿Estás seguro de que quieres eliminar el monitoreo para ${trade.pair}? Esto detendrá la búsqueda de señales de compra para este activo.`
+                  : `¿Estás seguro de que quieres cerrar la operación de ${trade.pair}? Si la operación está activa, se intentarán vender los activos restantes en Binance.`
+                }
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleting(false)} disabled={isDeleting} className="text-gray-300 border-gray-600 hover:bg-gray-700">
+              <Button variant="outline" onClick={() => setIsActionLoading(false)} disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
                 Cancelar
               </Button>
-              <Button variant="destructive" onClick={handleDeleteTrade} disabled={isDeleting}>
-                {isDeleting ? 'Eliminando...' : 'Eliminar'}
+              <Button variant="destructive" onClick={handleAction} disabled={isActionLoading}>
+                {isActionLoading 
+                  ? 'Procesando...' 
+                  : (isAwaitingSignal ? 'Eliminar Monitoreo' : 'Cerrar Trade')
+                }
               </Button>
             </DialogFooter>
           </DialogContent>
