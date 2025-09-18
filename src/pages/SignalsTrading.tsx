@@ -17,8 +17,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useState } from 'react';
-import { Badge } from '@/components/ui/badge'; // Importar Badge
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'; // Importar Tooltip
 
 interface SignalData {
   asset: string;
@@ -193,12 +191,6 @@ const SignalsTrading = () => {
     }
   };
 
-  const getConfidenceVariant = (confidence: number) => {
-    if (confidence >= 70) return 'default'; // Verde oscuro
-    if (confidence >= 50) return 'secondary'; // Amarillo
-    return 'outline'; // Gris
-  };
-
   const buySignals70Plus = signals?.filter(s => s.signal === 'BUY' && s.confidence >= 70) || [];
 
   return (
@@ -260,7 +252,7 @@ const SignalsTrading = () => {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-gray-300">Activos para Operar (BUY >= 70% Confianza)</FormLabel>
-                      <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2"> {/* Añadido scroll y padding */}
+                      <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
                         {buySignals70Plus.length > 0 ? (
                           buySignals70Plus.map((signal) => (
                             <FormField
@@ -318,16 +310,13 @@ const SignalsTrading = () => {
             <CardHeader className="pb-2">
               <CardTitle className="text-2xl text-yellow-400 flex items-center justify-between">
                 {signal.asset}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant={getConfidenceVariant(signal.confidence)} className="text-sm px-3 py-1">
-                      {signal.confidence.toFixed(1)}% Confianza
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent className="bg-gray-700 text-white border-gray-600">
-                    <p>Nivel de confianza de la señal de ML.</p>
-                  </TooltipContent>
-                </Tooltip>
+                <span className={`text-sm px-3 py-1 rounded-full font-semibold ${
+                  signal.confidence >= 70 ? 'bg-green-600 text-white' : 
+                  signal.confidence >= 50 ? 'bg-yellow-500 text-gray-900' : 
+                  'bg-gray-600 text-gray-300'
+                }`}>
+                  {signal.confidence.toFixed(1)}% Confianza
+                </span>
               </CardTitle>
               <CardDescription className={`flex items-center text-xl font-bold ${getSignalColor(signal.signal)} mt-1`}>
                 {getSignalIcon(signal.signal)}
