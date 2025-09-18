@@ -19,25 +19,40 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // 1. Obtener todas las operaciones activas
-    const { data: activeTrades, error: tradesError } = await supabaseAdmin
+    // 1. Obtener todas las operaciones activas (manuales y de señales)
+    const { data: manualTrades, error: manualTradesError } = await supabaseAdmin
       .from('manual_trades')
       .select('id, user_id, pair, asset_amount, purchase_price, target_price')
       .eq('status', 'active');
 
-    if (tradesError) {
-      console.error('Error fetching active trades:', tradesError);
-      return new Response(JSON.stringify({ error: 'Error fetching active trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (manualTradesError) {
+      console.error('Error fetching active manual trades:', manualTradesError);
+      return new Response(JSON.stringify({ error: 'Error fetching active manual trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    if (!activeTrades || activeTrades.length === 0) {
+    const { data: signalTrades, error: signalTradesError } = await supabaseAdmin
+      .from('signal_trades')
+      .select('id, user_id, pair, asset_amount, purchase_price, target_price')
+      .eq('status', 'active');
+
+    if (signalTradesError) {
+      console.error('Error fetching active signal trades:', signalTradesError);
+      return new Response(JSON.stringify({ error: 'Error fetching active signal trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const allActiveTrades = [...(manualTrades || []), ...(signalTrades || [])];
+
+    if (!allActiveTrades || allActiveTrades.length === 0) {
       return new Response(JSON.stringify({ message: 'No active trades to monitor.' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`Monitoring ${activeTrades.length} active trades.`);
+    console.log(`Monitoring ${allActiveTrades.length} active trades.`);
 
-    for (const trade of activeTrades) {
+    for (const trade of allActiveTrades) {
       try {
+        // Determinar la tabla de origen para la actualización
+        const tableName = manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades';
+
         // 2. Obtener las claves de API del usuario para esta operación
         const { data: keys, error: keysError } = await supabaseAdmin
           .from('api_keys')
@@ -48,7 +63,7 @@ serve(async (req) => {
         if (keysError || !keys) {
           console.error(`API keys not found for user ${trade.user_id} for trade ${trade.id}. Skipping.`);
           await supabaseAdmin
-            .from('manual_trades')
+            .from(tableName)
             .update({ status: 'error', error_message: 'API keys not found or invalid.' })
             .eq('id', trade.id);
           continue;
@@ -92,7 +107,7 @@ serve(async (req) => {
 
           // 6. Actualizar el estado de la operación en la base de datos
           await supabaseAdmin
-            .from('manual_trades')
+            .from(tableName)
             .update({
               status: 'completed',
               binance_order_id_sell: orderData.orderId.toString(),
@@ -104,8 +119,10 @@ serve(async (req) => {
         }
       } catch (tradeError: any) {
         console.error(`Error processing trade ${trade.id}:`, tradeError);
+        // Actualizar el estado de la operación a 'error' en la tabla correcta
+        const tableName = manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades';
         await supabaseAdmin
-          .from('manual_trades')
+          .from(tableName)
           .update({ status: 'error', error_message: tradeError.message })
           .eq('id', trade.id);
       }

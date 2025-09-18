@@ -1,11 +1,15 @@
 "use client";
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, TrendingUp, TrendingDown, PauseCircle } from "lucide-react";
-import { showError } from '@/utils/toast';
+import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play } from "lucide-react";
+import { showError, showSuccess } from '@/utils/toast';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/context/AuthProvider';
+import { useState } from 'react';
+import ActiveSignalTrades from '@/components/ActiveSignalTrades'; // Importar el nuevo componente
 
 interface SignalData {
   asset: string;
@@ -32,6 +36,10 @@ const fetchMlSignals = async (): Promise<SignalData[]> => {
 };
 
 const SignalsTrading = () => {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [isActivating, setIsActivating] = useState<string | null>(null); // Para deshabilitar el botón mientras se activa
+
   const { data: signals, isLoading, isError } = useQuery<SignalData[], Error>({
     queryKey: ['mlSignals'],
     queryFn: fetchMlSignals,
@@ -102,6 +110,43 @@ const SignalsTrading = () => {
     }
   };
 
+  const handleActivateTrade = async (signal: SignalData) => {
+    if (!user) {
+      showError("Debes iniciar sesión para activar una operación.");
+      return;
+    }
+    if (signal.signal !== 'BUY') {
+      showError("Solo se pueden activar señales de COMPRA en este momento.");
+      return;
+    }
+
+    setIsActivating(signal.asset);
+
+    try {
+      // Valores por defecto para la operación de señal
+      const usdtAmount = 10; // Ejemplo: 10 USDT por operación
+      const takeProfitPercentage = 5; // Ejemplo: 5% de ganancia
+
+      const { data, error } = await supabase.functions.invoke('initiate-signal-trade', {
+        body: {
+          pair: signal.asset,
+          usdtAmount: usdtAmount,
+          takeProfitPercentage: takeProfitPercentage,
+        },
+      });
+
+      if (error) throw error;
+
+      showSuccess(`¡Operación de ${signal.asset} activada con éxito!`);
+      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] }); // Invalidar la caché de operaciones activas
+      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] }); // Actualizar resumen de Binance
+    } catch (error: any) {
+      showError(`Error al activar la operación de ${signal.asset}: ${error.message}`);
+    } finally {
+      setIsActivating(null);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="text-center mb-8">
@@ -136,10 +181,33 @@ const SignalsTrading = () => {
               <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
               <p className="text-gray-400">Volatilidad: <span className="text-white font-semibold">{signal.volatility.toFixed(2)}%</span></p>
               <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
+              
+              {signal.signal === 'BUY' && (
+                <Button 
+                  className="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold"
+                  onClick={() => handleActivateTrade(signal)}
+                  disabled={isActivating === signal.asset}
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  {isActivating === signal.asset ? 'Activando...' : 'Activar Trade'}
+                </Button>
+              )}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      <Card className="bg-gray-800 border-gray-700">
+        <CardHeader>
+          <CardTitle className="text-yellow-400 text-2xl">Operaciones de Señales Activas</CardTitle>
+          <CardDescription className="text-gray-400">
+            Operaciones iniciadas automáticamente por señales de ML que están esperando alcanzar su objetivo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ActiveSignalTrades />
+        </CardContent>
+      </Card>
     </div>
   );
 };
