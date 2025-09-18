@@ -42,7 +42,8 @@ serve(async (req) => {
 
     const binanceUrl = 'https://api.binance.com/api/v3/account';
     const timestamp = Date.now();
-    const queryString = `timestamp=${timestamp}`;
+    // AÑADIDO: recvWindow para mayor tolerancia de tiempo
+    const queryString = `timestamp=${timestamp}&recvWindow=10000`;
     
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
