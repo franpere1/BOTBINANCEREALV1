@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState } from 'react'; // Añadido React
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -16,7 +17,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { useState } from 'react';
 
 interface SignalData {
   asset: string;
@@ -256,7 +256,7 @@ const SignalsTrading = () => {
                   name="selectedAssets"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-gray-300">Activos para Operar (BUY >= 50% Confianza)</FormLabel> {/* Etiqueta actualizada */}
+                      <FormLabel className="text-gray-300">Activos para Operar (BUY >= 50% Confianza)</FormLabel>
                       <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
                         {buySignalsForDisplay.length > 0 ? (
                           buySignalsForDisplay.map((signal) => (
@@ -291,7 +291,7 @@ const SignalsTrading = () => {
                             />
                           ))
                         ) : (
-                          <p className="text-gray-500 col-span-2">No hay activos con señal de COMPRA >= 50% de confianza en este momento.</p> {/* Mensaje actualizado */}
+                          <p className="text-gray-500 col-span-2">No hay activos con señal de COMPRA >= 50% de confianza en este momento.</p>
                         )}
                       </div>
                       <FormMessage />
