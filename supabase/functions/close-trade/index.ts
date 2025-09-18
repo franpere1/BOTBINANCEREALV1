@@ -62,6 +62,7 @@ serve(async (req) => {
 
     const { pair } = trade;
     const baseAsset = pair.replace('USDT', ''); // Asume que el par es XXXUSDT
+    console.log(`[CLOSE-TRADE] Procesando trade ${tradeId} para el par ${pair}. Base Asset: ${baseAsset}`);
 
     // 2. Obtener información de intercambio para precisión y límites
     const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${pair}`;
@@ -88,6 +89,8 @@ serve(async (req) => {
     const stepSize = parseFloat(quantityFilter.stepSize);
     const minQty = parseFloat(quantityFilter.minQty);
 
+    console.log(`[CLOSE-TRADE] Exchange Info para ${pair}: stepSize=${stepSize}, minQty=${minQty}, minNotional=${minNotional}`);
+
     // 3. Obtener el balance actual del activo
     const timestamp = Date.now();
     const accountQueryString = `timestamp=${timestamp}`;
@@ -107,9 +110,11 @@ serve(async (req) => {
     const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
     
     if (!assetBalance || parseFloat(assetBalance.free) === 0) {
+      console.error(`[CLOSE-TRADE] No hay saldo disponible de ${baseAsset} para vender. Balance free: ${assetBalance?.free}`);
       throw new Error(`No hay saldo disponible de ${baseAsset} para vender.`);
     }
     let finalQuantity = parseFloat(assetBalance.free);
+    console.log(`[CLOSE-TRADE] Balance libre de ${baseAsset}: ${finalQuantity}`);
 
     // 4. Obtener el precio actual para verificar MIN_NOTIONAL en ventas
     const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
@@ -119,17 +124,22 @@ serve(async (req) => {
       throw new Error(`Error al obtener el precio actual para ${pair}: ${tickerPriceData.msg || 'Error desconocido'}`);
     }
     const currentPrice = parseFloat(tickerPriceData.price);
+    console.log(`[CLOSE-TRADE] Precio actual de ${pair}: ${currentPrice}`);
 
     // 5. Validar y ajustar quantity
     let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
+    console.log(`[CLOSE-TRADE] Cantidad final antes de ajustar: ${finalQuantity}, Cantidad ajustada (stepSize): ${adjustedQuantity}`);
 
     if (adjustedQuantity < minQty) {
+      console.error(`[CLOSE-TRADE] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
       throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
     }
 
     // Check MIN_NOTIONAL for sell orders
     const notionalValue = adjustedQuantity * currentPrice;
+    console.log(`[CLOSE-TRADE] Valor nocional para la orden de venta: ${notionalValue.toFixed(8)} (Mínimo: ${minNotional})`);
     if (notionalValue < minNotional) {
+      console.error(`[CLOSE-TRADE] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
       throw new Error(`El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
     }
 
@@ -137,6 +147,7 @@ serve(async (req) => {
     const sellQueryString = `symbol=${pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
     const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
     const sellUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
+    console.log(`[CLOSE-TRADE] Enviando orden de venta a Binance: ${sellUrl}`);
 
     const sellResponse = await fetch(sellUrl, {
       method: 'POST',
@@ -144,6 +155,7 @@ serve(async (req) => {
     });
 
     const sellOrderData = await sellResponse.json();
+    console.log(`[CLOSE-TRADE] Respuesta de Binance para la venta:`, sellOrderData);
 
     if (!sellResponse.ok) {
       throw new Error(`Error de Binance al vender: ${sellOrderData.msg || 'Error desconocido'}`);
@@ -162,6 +174,7 @@ serve(async (req) => {
     if (updateError) {
       throw new Error(`Error al actualizar la operación en DB: ${updateError.message}`);
     }
+    console.log(`[CLOSE-TRADE] Trade ${tradeId} completado y actualizado en DB.`);
 
     return new Response(JSON.stringify({ message: 'Operación cerrada con éxito', orderId: sellOrderData.orderId }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
