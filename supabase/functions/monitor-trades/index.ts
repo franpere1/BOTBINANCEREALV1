@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
 
 const corsHeaders = {
@@ -23,7 +23,7 @@ serve(async (req) => {
     const { data: manualTrades, error: manualTradesError } = await supabaseAdmin
       .from('manual_trades')
       .select('id, user_id, pair, asset_amount, purchase_price, target_price')
-      .eq('status', 'active');
+      .eq('status', 'active'); // Solo operaciones activas
 
     if (manualTradesError) {
       console.error('Error fetching active manual trades:', manualTradesError);
@@ -33,7 +33,7 @@ serve(async (req) => {
     const { data: signalTrades, error: signalTradesError } = await supabaseAdmin
       .from('signal_trades')
       .select('id, user_id, pair, asset_amount, purchase_price, target_price')
-      .eq('status', 'active');
+      .eq('status', 'active'); // Solo operaciones activas
 
     if (signalTradesError) {
       console.error('Error fetching active signal trades:', signalTradesError);
