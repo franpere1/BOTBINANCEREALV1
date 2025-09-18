@@ -40,17 +40,12 @@ const BalanceDisplay = () => {
     if (functionError) {
       console.error('Error invoking function:', functionError);
       
-      // Intentar obtener el error detallado de Binance
-      let detailedErrorMessage = 'No se pudo obtener el saldo. Verifica tus claves de API y los permisos en Binance.';
-      if (functionError.context && functionError.context.details) {
-        const binanceError = functionError.context.details;
-        detailedErrorMessage = `Error de Binance: ${binanceError.msg} (Código: ${binanceError.code})`;
-      } else if (functionError.context && functionError.context.error) {
-        detailedErrorMessage = `Error en la función: ${functionError.context.error}`;
-      }
+      // MODO DEPURACIÓN: Mostrar el error técnico completo
+      const rawErrorString = JSON.stringify(functionError, null, 2);
+      const detailedErrorMessage = `Error técnico: ${rawErrorString}`;
 
       setError(detailedErrorMessage);
-      showError('Error al obtener el saldo.');
+      showError('Error al obtener el saldo. Revisa los detalles en pantalla.');
       setBalances([]);
     } else {
       setBalances(data.balances);
@@ -81,8 +76,8 @@ const BalanceDisplay = () => {
         )}
 
         {error && !isLoading && (
-          <div className="mt-4 text-center text-red-400 bg-red-900/50 p-3 rounded-md">
-            <p>{error}</p>
+          <div className="mt-4 text-left text-red-400 bg-red-900/50 p-3 rounded-md overflow-auto">
+            <p className="font-mono text-xs whitespace-pre-wrap">{error}</p>
           </div>
         )}
 
