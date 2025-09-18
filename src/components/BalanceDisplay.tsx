@@ -83,7 +83,7 @@ const BalanceDisplay = () => {
             {balances.length > 0 ? (
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow className="border-gray-700">
                     <TableHead className="text-white">Activo</TableHead>
                     <TableHead className="text-right text-white">Disponible</TableHead>
                     <TableHead className="text-right text-white">Bloqueado</TableHead>
@@ -91,10 +91,10 @@ const BalanceDisplay = () => {
                 </TableHeader>
                 <TableBody>
                   {balances.map((balance) => (
-                    <TableRow key={balance.asset}>
-                      <TableCell className="font-medium">{balance.asset}</TableCell>
-                      <TableCell className="text-right">{parseFloat(balance.free).toFixed(8)}</TableCell>
-                      <TableCell className="text-right">{parseFloat(balance.locked).toFixed(8)}</TableCell>
+                    <TableRow key={balance.asset} className="border-gray-700">
+                      <TableCell className="font-medium text-white">{balance.asset}</TableCell>
+                      <TableCell className="text-right text-gray-300">{parseFloat(balance.free).toFixed(8)}</TableCell>
+                      <TableCell className="text-right text-gray-300">{parseFloat(balance.locked).toFixed(8)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
