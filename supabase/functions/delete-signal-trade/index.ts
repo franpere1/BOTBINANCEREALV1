@@ -148,6 +148,9 @@ serve(async (req) => {
           }
         }
       }
+    } else if (trade.status === 'awaiting_buy_signal') {
+      console.log(`[DELETE-TRADE] Trade ${tradeId} is awaiting a buy signal. No assets to sell.`);
+      // No need to sell, just delete the record.
     }
 
     // 3. Eliminar el registro de la base de datos

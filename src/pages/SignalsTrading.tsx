@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react'; // Añadido React
+import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -77,7 +77,8 @@ const SignalsTrading = () => {
     setIsSubmittingBulkTrades(true);
 
     try {
-      const { data: results, error: functionError } = await supabase.functions.invoke('bulk-initiate-signal-trades', {
+      // Llamar a la nueva función Edge para configurar el monitoreo
+      const { data: results, error: functionError } = await supabase.functions.invoke('setup-signal-monitoring', {
         body: {
           usdtAmount: values.usdtAmount,
           takeProfitPercentage: values.takeProfitPercentage,
@@ -89,34 +90,27 @@ const SignalsTrading = () => {
 
       let successCount = 0;
       let errorMessages: string[] = [];
-      let skippedCount = 0;
 
       results.forEach((res: any) => {
         if (res.status === 'success') {
           successCount++;
         } else if (res.status === 'error') {
           errorMessages.push(`${res.asset}: ${res.message}`);
-        } else if (res.status === 'skipped') {
-          skippedCount++;
         }
       });
 
       if (successCount > 0) {
-        showSuccess(`Se iniciaron ${successCount} operaciones con éxito.`);
-      }
-      if (skippedCount > 0) {
-        showError(`Se omitieron ${skippedCount} operaciones porque no cumplían los criterios de señal en el momento de la ejecución.`);
+        showSuccess(`Se configuró el monitoreo para ${successCount} activos.`);
       }
       if (errorMessages.length > 0) {
-        showError(`Errores al iniciar operaciones: ${errorMessages.join('; ')}`);
+        showError(`Errores al configurar el monitoreo: ${errorMessages.join('; ')}`);
       }
 
       queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
-      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
       setIsDialogOpen(false);
       form.reset();
     } catch (error: any) {
-      showError(`Error general al iniciar operaciones por señal: ${error.message}`);
+      showError(`Error general al configurar el monitoreo de señales: ${error.message}`);
     } finally {
       setIsSubmittingBulkTrades(false);
     }
@@ -191,8 +185,8 @@ const SignalsTrading = () => {
     }
   };
 
-  // Filtrar activos con señal de COMPRA y al menos 50% de confianza para mostrar en el diálogo
-  const buySignalsForDisplay = signals?.filter(s => s.signal === 'BUY' && s.confidence >= 50) || [];
+  // Mostrar todos los activos para selección en el diálogo
+  const allSignalsForDisplay = signals || [];
 
   return (
     <div className="space-y-8">
@@ -209,18 +203,15 @@ const SignalsTrading = () => {
           <DialogTrigger asChild>
             <Button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
               <Play className="mr-2 h-5 w-5" />
-              Iniciar Trades por Señal
+              Configurar Monitoreo de Señales
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
             <DialogHeader>
-              <DialogTitle className="text-yellow-400">Iniciar Operaciones por Señal</DialogTitle>
+              <DialogTitle className="text-yellow-400">Configurar Monitoreo de Operaciones por Señal</DialogTitle>
               <DialogDescription className="text-gray-400">
-                Configura los parámetros para iniciar operaciones de compra basadas en señales de ML.
-                <br />
-                <span className="text-sm text-gray-500">
-                  (Solo se ejecutarán operaciones para señales de COMPRA con 70% o más de confianza, aunque aquí se muestren desde 50%.)
-                </span>
+                Selecciona los activos que deseas monitorear. El sistema iniciará automáticamente una operación de compra
+                cuando se detecte una señal de COMPRA con 70% o más de confianza para el activo seleccionado.
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
@@ -256,10 +247,10 @@ const SignalsTrading = () => {
                   name="selectedAssets"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-gray-300">Activos para Operar (BUY >= 50% Confianza)</FormLabel>
+                      <FormLabel className="text-gray-300">Activos para Monitorear</FormLabel>
                       <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
-                        {buySignalsForDisplay.length > 0 ? (
-                          buySignalsForDisplay.map((signal) => (
+                        {allSignalsForDisplay.length > 0 ? (
+                          allSignalsForDisplay.map((signal) => (
                             <FormField
                               key={signal.asset}
                               control={form.control}
@@ -283,7 +274,7 @@ const SignalsTrading = () => {
                                       />
                                     </FormControl>
                                     <FormLabel className="font-normal text-gray-300">
-                                      {signal.asset} ({signal.confidence.toFixed(1)}%)
+                                      {signal.asset} ({signal.signal} - {signal.confidence.toFixed(1)}%)
                                     </FormLabel>
                                   </FormItem>
                                 );
@@ -291,7 +282,7 @@ const SignalsTrading = () => {
                             />
                           ))
                         ) : (
-                          <p className="text-gray-500 col-span-2">No hay activos con señal de COMPRA >= 50% de confianza en este momento.</p>
+                          <p className="text-gray-500 col-span-2">No hay activos disponibles para monitorear en este momento.</p>
                         )}
                       </div>
                       <FormMessage />
@@ -300,7 +291,7 @@ const SignalsTrading = () => {
                 />
                 <DialogFooter className="mt-4">
                   <Button type="submit" disabled={isSubmittingBulkTrades} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
-                    {isSubmittingBulkTrades ? 'Iniciando Trades...' : 'Iniciar Trades'}
+                    {isSubmittingBulkTrades ? 'Configurando Monitoreo...' : 'Configurar Monitoreo'}
                   </Button>
                 </DialogFooter>
               </form>
