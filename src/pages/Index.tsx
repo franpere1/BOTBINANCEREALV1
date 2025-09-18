@@ -5,9 +5,9 @@ import { MadeWithDyad } from "@/components/made-with-dyad";
 
 const Index = () => {
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       <Header />
-      <main className="container mx-auto p-8">
+      <main className="container mx-auto p-8 flex-grow">
         <div className="flex flex-col items-center text-center mb-8">
             <h2 className="text-4xl font-bold mb-4">
               Bienvenido a Trade Binance
@@ -23,9 +23,9 @@ const Index = () => {
         </div>
 
       </main>
-      <div className="absolute bottom-0 w-full">
+      <footer className="w-full py-4">
         <MadeWithDyad />
-      </div>
+      </footer>
     </div>
   );
 };
