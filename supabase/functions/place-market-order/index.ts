@@ -43,7 +43,7 @@ serve(async (req) => {
     const { api_key, api_secret } = keys;
 
     // Lógica de la orden
-    const { pair, side, quantity, quoteOrderQty, sellAllAvailable } = await req.json(); // Añadido sellAllAvailable
+    const { pair, side, quantity, quoteOrderQty, sellAllAvailable } = await req.json();
     if (!pair || !side) throw new Error('Los parámetros "pair" y "side" son obligatorios.');
 
     // Obtener información de intercambio para precisión y límites
@@ -101,24 +101,63 @@ serve(async (req) => {
         const baseAsset = pair.replace('USDT', ''); // Asume que el par es XXXUSDT
         const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
         
+        console.log(`[SELL] Base Asset: ${baseAsset}`);
+        console.log(`[SELL] Asset Balance (free): ${assetBalance?.free}`);
+
         if (!assetBalance || parseFloat(assetBalance.free) === 0) {
           throw new Error(`No hay saldo disponible de ${baseAsset} para vender.`);
         }
         finalQuantity = parseFloat(assetBalance.free);
-      }
 
-      // Validar y ajustar quantity
-      let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
-      if (adjustedQuantity < minQty) {
-        throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
+        // Obtener el precio actual para verificar MIN_NOTIONAL en ventas
+        const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
+        const tickerPriceResponse = await fetch(tickerPriceUrl);
+        const tickerPriceData = await tickerPriceResponse.json();
+        if (!tickerPriceResponse.ok || tickerPriceData.code) {
+          throw new Error(`Error al obtener el precio actual para ${pair}: ${tickerPriceData.msg || 'Error desconocido'}`);
+        }
+        const currentPrice = parseFloat(tickerPriceData.price);
+        console.log(`[SELL] Current Price for ${pair}: ${currentPrice}`);
+
+        // Validar y ajustar quantity
+        let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
+        console.log(`[SELL] Calculated finalQuantity: ${finalQuantity}`);
+        console.log(`[SELL] stepSize: ${stepSize}`);
+        console.log(`[SELL] minQty: ${minQty}`);
+        console.log(`[SELL] adjustedQuantity (after stepSize adjustment): ${adjustedQuantity}`);
+
+        if (adjustedQuantity < minQty) {
+          throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
+        }
+
+        // Check MIN_NOTIONAL for sell orders as well, using current price
+        const notionalValue = adjustedQuantity * currentPrice;
+        console.log(`[SELL] Notional value for sell order: ${notionalValue}`);
+        console.log(`[SELL] minNotional: ${minNotional}`);
+
+        if (notionalValue < minNotional) {
+          throw new Error(`El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
+        }
+
+        queryString += `&quantity=${adjustedQuantity}`;
+      } else {
+        // Si no es sellAllAvailable, se espera que 'quantity' venga en el body
+        let adjustedQuantity = adjustQuantity(quantity, stepSize);
+        if (adjustedQuantity < minQty) {
+          throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
+        }
+        queryString += `&quantity=${adjustedQuantity}`;
       }
-      queryString += `&quantity=${adjustedQuantity}`;
     } else {
       throw new Error('Parámetros de cantidad inválidos para la orden.');
     }
 
     const signature = new HmacSha256(api_secret).update(queryString).toString();
     const url = `https://api.binance.com/api/v3/order?${queryString}&signature=${signature}`;
+
+    console.log(`[Binance API Call] URL: ${url}`); // Log de la URL completa
+    console.log(`[Binance API Call] Query String: ${queryString}`); // Log del query string
+    console.log(`[Binance API Call] Signature: ${signature}`); // Log de la firma
 
     const response = await fetch(url, {
       method: 'POST',
