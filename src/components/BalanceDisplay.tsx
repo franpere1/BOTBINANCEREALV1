@@ -33,13 +33,23 @@ const BalanceDisplay = () => {
     setError(null);
     setHasFetched(true);
 
-    const { data, error } = await supabase.functions.invoke('get-binance-balance');
+    const { data, error: functionError } = await supabase.functions.invoke('get-binance-balance');
 
     setIsLoading(false);
 
-    if (error) {
-      console.error('Error invoking function:', error);
-      setError('No se pudo obtener el saldo. Verifica tus claves de API y los permisos en Binance.');
+    if (functionError) {
+      console.error('Error invoking function:', functionError);
+      
+      // Intentar obtener el error detallado de Binance
+      let detailedErrorMessage = 'No se pudo obtener el saldo. Verifica tus claves de API y los permisos en Binance.';
+      if (functionError.context && functionError.context.details) {
+        const binanceError = functionError.context.details;
+        detailedErrorMessage = `Error de Binance: ${binanceError.msg} (Código: ${binanceError.code})`;
+      } else if (functionError.context && functionError.context.error) {
+        detailedErrorMessage = `Error en la función: ${functionError.context.error}`;
+      }
+
+      setError(detailedErrorMessage);
       showError('Error al obtener el saldo.');
       setBalances([]);
     } else {
