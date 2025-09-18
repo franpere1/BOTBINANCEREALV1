@@ -1,7 +1,7 @@
 import ManualTradeForm from '@/components/ManualTradeForm';
 import ActiveTrades from '@/components/ActiveTrades';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertTriangle } from 'lucide-react';
+// Eliminado AlertTriangle
 
 const ManualTrading = () => {
   return (
@@ -21,10 +21,7 @@ const ManualTrading = () => {
       <Card className="bg-gray-800 border-gray-700">
         <CardHeader>
           <CardTitle className="text-yellow-400 text-2xl">Operaciones Activas</CardTitle>
-           <CardDescription className="text-gray-400 flex items-center gap-2 pt-2">
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
-            La venta automática solo funciona mientras esta página esté abierta en tu navegador.
-          </CardDescription>
+           {/* Eliminado el mensaje de advertencia */}
         </CardHeader>
         <CardContent>
           <ActiveTrades />

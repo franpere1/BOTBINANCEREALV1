@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
-import { useEffect, useState } from 'react';
+import { useState } from 'react'; // Eliminado useEffect
 
 interface Trade {
   id: string;
@@ -17,7 +17,7 @@ interface Trade {
   purchase_price: number;
   target_price: number;
   take_profit_percentage: number;
-  created_at: string; // Añadido created_at
+  created_at: string;
 }
 
 const fetchActiveTrades = async (userId: string) => {
@@ -74,6 +74,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
 
       showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
       queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['activeTradesForSummary'] }); // Invalidar también el resumen
     } catch (error: any) {
       showError(`Error al cerrar la operación de ${trade.pair}: ${error.message}`);
     } finally {
@@ -81,17 +82,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
     }
   };
 
-  useEffect(() => {
-    const checkTakeProfit = async () => {
-      if (currentPrice && currentPrice >= trade.target_price) {
-        // Para evitar doble ejecución, solo cerramos si no se está cerrando manualmente
-        if (isClosing) return;
-        await handleCloseTrade();
-      }
-    };
-
-    checkTakeProfit();
-  }, [currentPrice, trade, queryClient, isClosing, handleCloseTrade]); // Añadir isClosing y handleCloseTrade a las dependencias
+  // Eliminado el useEffect que monitoreaba el take-profit, ahora lo hace la Edge Function
 
   const pnl = currentPrice ? ((currentPrice - trade.purchase_price) / trade.purchase_price) * 100 : 0;
   const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
@@ -126,6 +117,7 @@ const ActiveTrades = () => {
     queryKey: ['activeTrades'],
     queryFn: () => fetchActiveTrades(user!.id),
     enabled: !!user,
+    refetchInterval: 10000, // Refrescar la lista de trades activos cada 10 segundos
   });
 
   if (isLoading) {
