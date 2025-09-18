@@ -7,6 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Tasa de comisión de Binance (0.1%)
+const BINANCE_FEE_RATE = 0.001;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -83,7 +86,9 @@ serve(async (req) => {
     const executedQty = parseFloat(orderResult.executedQty);
     const cummulativeQuoteQty = parseFloat(orderResult.cummulativeQuoteQty);
     const purchasePrice = cummulativeQuoteQty / executedQty;
-    const targetPrice = purchasePrice * (1 + takeProfitPercentage / 100);
+    
+    // Ajustar el precio objetivo para incluir la comisión de venta
+    const targetPrice = (purchasePrice * (1 + takeProfitPercentage / 100)) / (1 - BINANCE_FEE_RATE);
 
     // 4. Actualizar la operación en la DB con los detalles de la compra
     const { error: updateError } = await supabaseAdmin

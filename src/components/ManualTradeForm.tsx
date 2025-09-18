@@ -18,6 +18,9 @@ const topPairs = [
   'DOGEUSDT', 'ADAUSDT', 'SHIBUSDT', 'AVAXUSDT', 'DOTUSDT'
 ];
 
+// Tasa de comisión de Binance (0.1%)
+const BINANCE_FEE_RATE = 0.001;
+
 const formSchema = z.object({
   pair: z.string().min(1, "Debes seleccionar un par."),
   usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
@@ -80,7 +83,9 @@ const ManualTradeForm = () => {
       const executedQty = parseFloat(orderResult.executedQty);
       const cummulativeQuoteQty = parseFloat(orderResult.cummulativeQuoteQty);
       const purchasePrice = cummulativeQuoteQty / executedQty;
-      const targetPrice = purchasePrice * (1 + values.takeProfitPercentage / 100);
+      
+      // Ajustar el precio objetivo para incluir la comisión de venta
+      const targetPrice = (purchasePrice * (1 + values.takeProfitPercentage / 100)) / (1 - BINANCE_FEE_RATE);
 
       const { error: updateError } = await supabase
         .from('manual_trades')
