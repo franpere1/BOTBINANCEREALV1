@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient }s from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
 
 const corsHeaders = {
@@ -19,7 +19,7 @@ serve(async (req) => {
   }
 
   try {
-    // Autenticación y obtención de claves de API (igual que en la función de balance)
+    // Autenticación y obtención de claves de API
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) throw new Error('Falta la cabecera de autorización');
     const token = authHeader.replace('Bearer ', '');
@@ -43,7 +43,7 @@ serve(async (req) => {
     const { api_key, api_secret } = keys;
 
     // Lógica de la orden
-    const { pair, side, quantity, quoteOrderQty, sellAllAvailable } = await req.json();
+    const { pair, side, quantity, quoteOrderQty } = await req.json();
     if (!pair || !side) throw new Error('Los parámetros "pair" y "side" son obligatorios.');
 
     // Obtener información de intercambio para precisión y límites
@@ -78,76 +78,12 @@ serve(async (req) => {
         throw new Error(`La cantidad de la orden en USDT (${quoteOrderQty}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
       }
       queryString += `&quoteOrderQty=${quoteOrderQty}`;
-    } else if (side.toUpperCase() === 'SELL') {
-      let finalQuantity = quantity;
-
-      if (sellAllAvailable) {
-        // Obtener el balance actual del activo
-        const timestamp = Date.now();
-        const accountQueryString = `timestamp=${timestamp}`;
-        const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
-        const accountUrl = `https://api.binance.com/api/v3/account?${accountQueryString}&signature=${accountSignature}`;
-
-        const accountResponse = await fetch(accountUrl, {
-          method: 'GET',
-          headers: { 'X-MBX-APIKEY': api_key },
-        });
-        const accountData = await accountResponse.json();
-
-        if (!accountResponse.ok) {
-          throw new Error(`Error al obtener el balance de la cuenta de Binance: ${accountData.msg || 'Error desconocido'}`);
-        }
-
-        const baseAsset = pair.replace('USDT', ''); // Asume que el par es XXXUSDT
-        const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
-        
-        console.log(`[SELL] Base Asset: ${baseAsset}`);
-        console.log(`[SELL] Asset Balance (free): ${assetBalance?.free}`);
-
-        if (!assetBalance || parseFloat(assetBalance.free) === 0) {
-          throw new Error(`No hay saldo disponible de ${baseAsset} para vender.`);
-        }
-        finalQuantity = parseFloat(assetBalance.free);
-
-        // Obtener el precio actual para verificar MIN_NOTIONAL en ventas
-        const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
-        const tickerPriceResponse = await fetch(tickerPriceUrl);
-        const tickerPriceData = await tickerPriceResponse.json();
-        if (!tickerPriceResponse.ok || tickerPriceData.code) {
-          throw new Error(`Error al obtener el precio actual para ${pair}: ${tickerPriceData.msg || 'Error desconocido'}`);
-        }
-        const currentPrice = parseFloat(tickerPriceData.price);
-        console.log(`[SELL] Current Price for ${pair}: ${currentPrice}`);
-
-        // Validar y ajustar quantity
-        let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
-        console.log(`[SELL] Calculated finalQuantity: ${finalQuantity}`);
-        console.log(`[SELL] stepSize: ${stepSize}`);
-        console.log(`[SELL] minQty: ${minQty}`);
-        console.log(`[SELL] adjustedQuantity (after stepSize adjustment): ${adjustedQuantity}`);
-
-        if (adjustedQuantity < minQty) {
-          throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
-        }
-
-        // Check MIN_NOTIONAL for sell orders as well, using current price
-        const notionalValue = adjustedQuantity * currentPrice;
-        console.log(`[SELL] Notional value for sell order: ${notionalValue}`);
-        console.log(`[SELL] minNotional: ${minNotional}`);
-
-        if (notionalValue < minNotional) {
-          throw new Error(`El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
-        }
-
-        queryString += `&quantity=${adjustedQuantity}`;
-      } else {
-        // Si no es sellAllAvailable, se espera que 'quantity' venga en el body
-        let adjustedQuantity = adjustQuantity(quantity, stepSize);
-        if (adjustedQuantity < minQty) {
-          throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
-        }
-        queryString += `&quantity=${adjustedQuantity}`;
+    } else if (side.toUpperCase() === 'SELL' && quantity) {
+      let adjustedQuantity = adjustQuantity(quantity, stepSize);
+      if (adjustedQuantity < minQty) {
+        throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
       }
+      queryString += `&quantity=${adjustedQuantity}`;
     } else {
       throw new Error('Parámetros de cantidad inválidos para la orden.');
     }
@@ -155,17 +91,12 @@ serve(async (req) => {
     const signature = new HmacSha256(api_secret).update(queryString).toString();
     const url = `https://api.binance.com/api/v3/order?${queryString}&signature=${signature}`;
 
-    console.log(`[Binance API Call] URL: ${url}`); // Log de la URL completa
-    console.log(`[Binance API Call] Query String: ${queryString}`); // Log del query string
-    console.log(`[Binance API Call] Signature: ${signature}`); // Log de la firma
-
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'X-MBX-APIKEY': api_key },
     });
 
     const responseData = await response.json();
-    console.log('Binance API Response:', responseData); // Log de la respuesta de Binance
 
     if (!response.ok) {
       throw new Error(`Error de Binance: ${responseData.msg || 'Error desconocido'}`);
@@ -178,10 +109,9 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error en la Edge Function place-market-order:', error);
-    // Siempre devolver 200, pero con un campo de error en el cuerpo
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200, 
+      status: 500, 
     });
   }
 });

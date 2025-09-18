@@ -52,32 +52,20 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const handleCloseTrade = async () => {
     setIsClosing(true);
     try {
-      // 1. Ejecutar la venta, indicando que se venda todo el saldo disponible
-      const { data: sellOrder, error: functionError } = await supabase.functions.invoke('place-market-order', {
+      // Llamar a la nueva función Edge close-trade
+      const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
         body: {
-          pair: trade.pair,
-          side: 'SELL',
-          sellAllAvailable: true, // Nuevo parámetro
+          tradeId: trade.id,
+          tradeType: 'signal',
         },
       });
 
       if (functionError) {
         throw functionError;
       }
-      if (sellOrder.error) { // Verificar si la función Edge devolvió un error en el cuerpo
-        throw new Error(sellOrder.error);
+      if (data.error) { // Verificar si la función Edge devolvió un error en el cuerpo
+        throw new Error(data.error);
       }
-
-      // 2. Actualizar la operación a 'completed'
-      const { error: updateError } = await supabase
-        .from('signal_trades')
-        .update({
-          status: 'completed',
-          binance_order_id_sell: sellOrder.orderId.toString(),
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', trade.id);
-      if (updateError) throw updateError;
 
       showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
       queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });

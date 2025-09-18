@@ -51,32 +51,20 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const handleCloseTrade = async () => {
     setIsClosing(true);
     try {
-      // 1. Ejecutar la venta, indicando que se venda todo el saldo disponible
-      const { data: sellOrder, error: functionError } = await supabase.functions.invoke('place-market-order', {
+      // Llamar a la nueva función Edge close-trade
+      const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
         body: {
-          pair: trade.pair,
-          side: 'SELL',
-          sellAllAvailable: true, // Nuevo parámetro
+          tradeId: trade.id,
+          tradeType: 'manual',
         },
       });
 
       if (functionError) {
         throw functionError;
       }
-      if (sellOrder.error) { // Verificar si la función Edge devolvió un error en el cuerpo
-        throw new Error(sellOrder.error);
+      if (data.error) { // Verificar si la función Edge devolvió un error en el cuerpo
+        throw new Error(data.error);
       }
-
-      // 2. Actualizar la operación a 'completed'
-      const { error: updateError } = await supabase
-        .from('manual_trades')
-        .update({
-          status: 'completed',
-          binance_order_id_sell: sellOrder.orderId.toString(),
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', trade.id);
-      if (updateError) throw updateError;
 
       showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
       queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
@@ -98,7 +86,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
       <TableCell className="text-gray-300">{trade.purchase_price.toFixed(4)}</TableCell>
       <TableCell className="text-yellow-400">{trade.target_price.toFixed(4)}</TableCell>
-      <TableCell className="text-gray-300">{trade.take_profit_percentage.toFixed(2)}%</TableCell> {/* Nueva celda */}
+      <TableCell className="text-gray-300">{trade.take_profit_percentage.toFixed(2)}%</TableCell>
       <TableCell className="text-white">
         {isLoadingPrice ? <Skeleton className="h-4 w-16" /> : currentPrice?.toFixed(4)}
       </TableCell>
@@ -151,7 +139,7 @@ const ActiveTrades = () => {
           <TableHead className="text-white">Fecha Apertura</TableHead>
           <TableHead className="text-white">Precio Compra</TableHead>
           <TableHead className="text-white">Precio Objetivo</TableHead>
-          <TableHead className="text-white">Objetivo (%)</TableHead> {/* Nueva cabecera */}
+          <TableHead className="text-white">Objetivo (%)</TableHead>
           <TableHead className="text-white">Precio Actual</TableHead>
           <TableHead className="text-white">Ganancia/Pérdida</TableHead>
           <TableHead className="text-right text-white">Acción</TableHead>
