@@ -8,93 +8,51 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // Create a Supabase client with the user's auth context
+    // Primero, una rápida verificación de autenticación para asegurarnos de que todo está bien.
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
       { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     );
-
-    // Get the user from the auth header
     const { data: { user } } = await supabaseAdmin.auth.getUser();
     if (!user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    // Retrieve the user's API keys from the database
-    const { data: keys, error: keysError } = await supabaseAdmin
-      .from('api_keys')
-      .select('api_key, api_secret')
-      .eq('user_id', user.id)
-      .single()
+    // Ahora, la prueba de criptografía aislada.
+    const testSecret = "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YV23Xat2R09J89QbeeM2N68KTr3P9otPtozM";
+    const testQueryString = "timestamp=1578963600000&recvWindow=10000";
 
-    if (keysError || !keys) {
-      console.error('API keys error:', keysError);
-      return new Response(JSON.stringify({ error: 'API keys not found for this user.' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Prepare the request to the Binance API
-    const binanceUrl = 'https://api.binance.com/api/v3/account';
-    const timestamp = Date.now();
-    const queryString = `timestamp=${timestamp}&recvWindow=10000`;
-    
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
         "raw",
-        encoder.encode(keys.api_secret),
+        encoder.encode(testSecret),
         { name: "HMAC", hash: "SHA-256" },
         false,
         ["sign"]
     );
-    const signatureBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(queryString));
+    const signatureBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(testQueryString));
     const signature = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 
-    const urlWithParams = `${binanceUrl}?${queryString}&signature=${signature}`;
-
-    // Make the request to Binance
-    const response = await fetch(urlWithParams, {
-      method: 'GET',
-      headers: {
-        'X-MBX-APIKEY': keys.api_key,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const data = await response.json();
-
-    // If Binance returns an error, forward it
-    if (!response.ok) {
-        console.error('Binance API error:', data);
-        return new Response(JSON.stringify({ error: 'Failed to fetch from Binance API', details: data }), {
-            status: response.status,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-    }
-
-    // Filter for balances with a positive amount
-    const balances = data.balances.filter((asset: any) => parseFloat(asset.free) > 0 || parseFloat(asset.locked) > 0);
-
-    // Return the balances
-    return new Response(JSON.stringify({ balances }), {
+    return new Response(JSON.stringify({ 
+        message: "Prueba de encriptación completada.",
+        signatureGenerated: signature.substring(0, 15) + "..." // Devuelve solo una parte por seguridad
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
-    })
+    });
 
   } catch (error) {
-    console.error('Unhandled function error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    const errorResponse = {
+      message: error.message,
+      stack: error.stack,
+    };
+    return new Response(JSON.stringify({ error: 'La prueba de encriptación falló', details: errorResponse }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     })

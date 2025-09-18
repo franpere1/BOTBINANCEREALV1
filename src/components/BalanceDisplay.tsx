@@ -5,112 +5,83 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showError, showSuccess } from '@/utils/toast';
-import { Wallet } from 'lucide-react';
-
-type Balance = {
-  asset: string;
-  free: string;
-  locked: string;
-};
+import { ShieldCheck, ShieldX } from 'lucide-react';
 
 const BalanceDisplay = () => {
   const { session } = useAuth();
-  const [balances, setBalances] = useState<Balance[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasFetched, setHasFetched] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
 
-  const fetchBalance = async () => {
+  const runCryptoTest = async () => {
     if (!session) {
-      showError("Debes iniciar sesión para consultar tu saldo.");
+      showError("Debes iniciar sesión para realizar la prueba.");
       return;
     }
 
     setIsLoading(true);
     setError(null);
-    setHasFetched(true);
+    setTestResult(null);
 
     const { data, error: functionError } = await supabase.functions.invoke('get-binance-balance');
 
     setIsLoading(false);
 
     if (functionError) {
-      console.error('Error invoking function:', functionError);
+      console.error('Error invoking crypto test function:', functionError);
       const rawErrorString = JSON.stringify(functionError, null, 2);
-      const detailedErrorMessage = `Error técnico: ${rawErrorString}`;
-      setError(detailedErrorMessage);
-      showError('Error al obtener el saldo. Revisa los detalles en pantalla.');
-      setBalances([]);
+      setError(`Error técnico en la prueba de encriptación: ${rawErrorString}`);
+      showError('La prueba de encriptación falló. Revisa los detalles.');
     } else if (data.error) {
-        console.error('Binance API Error:', data.details);
-        const errorMessage = `Error de Binance: ${data.details.msg} (Código: ${data.details.code})`;
-        setError(errorMessage);
-        showError('Hubo un problema con la API de Binance.');
-        setBalances([]);
+      console.error('Crypto test failed on server:', data.details);
+      setError(`El servidor reportó un fallo en la encriptación: ${data.details.message}`);
+      showError('La prueba de encriptación falló en el servidor.');
     }
     else {
-      setBalances(data.balances);
-      showSuccess('Saldo actualizado correctamente.');
+      setTestResult(data);
+      showSuccess('¡Prueba de encriptación exitosa!');
     }
   };
 
   return (
     <Card className="w-full max-w-md mx-auto bg-gray-800 border-gray-700">
       <CardHeader>
-        <CardTitle className="text-yellow-400">Saldo de la Cuenta</CardTitle>
+        <CardTitle className="text-yellow-400">Diagnóstico de Encriptación</CardTitle>
         <CardDescription className="text-gray-400">
-          Consulta el saldo de tu cuenta de Binance en tiempo real.
+          Prueba final para verificar el módulo de encriptación del servidor.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button onClick={fetchBalance} disabled={isLoading} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
-          <Wallet className="mr-2 h-4 w-4" />
-          {isLoading ? 'Consultando...' : 'Consultar Saldo'}
+        <Button onClick={runCryptoTest} disabled={isLoading} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
+          {isLoading ? 'Probando encriptación...' : 'Iniciar Prueba de Encriptación'}
         </Button>
 
         {isLoading && (
           <div className="mt-4 space-y-2">
             <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
           </div>
         )}
 
         {error && !isLoading && (
-          <div className="mt-4 text-left text-red-400 bg-red-900/50 p-3 rounded-md overflow-auto">
-            <p className="font-mono text-xs whitespace-pre-wrap">{error}</p>
+          <div className="mt-4 flex items-start p-4 bg-red-900/50 rounded-md border border-red-700">
+            <ShieldX className="h-6 w-6 text-red-400 mr-4 flex-shrink-0" />
+            <div>
+              <h4 className="font-bold text-red-300">Fallo en la prueba</h4>
+              <p className="font-mono text-xs whitespace-pre-wrap mt-2">{error}</p>
+            </div>
           </div>
         )}
 
-        {!isLoading && !error && hasFetched && balances.length === 0 && (
-            <div className="mt-4 text-center text-gray-400 bg-gray-900/50 p-3 rounded-md">
-                <p>No se encontraron saldos o todas las monedas tienen balance cero.</p>
+        {testResult && !isLoading && (
+          <div className="mt-4 flex items-start p-4 bg-green-900/50 rounded-md border border-green-700">
+            <ShieldCheck className="h-6 w-6 text-green-400 mr-4 flex-shrink-0" />
+            <div>
+                <h4 className="font-bold text-green-300">Prueba Exitosa</h4>
+                <p className="text-green-300 text-sm mt-1">{testResult.message}</p>
+                <p className="font-mono text-xs text-gray-400 mt-2">Firma generada: {testResult.signatureGenerated}</p>
             </div>
-        )}
-
-        {!isLoading && !error && balances.length > 0 && (
-          <div className="mt-4 overflow-x-auto">
-            <Table className="text-white">
-              <TableHeader>
-                <TableRow className="border-gray-700 hover:bg-gray-700/50">
-                  <TableHead className="text-yellow-400">Activo</TableHead>
-                  <TableHead className="text-right text-yellow-400">Disponible</TableHead>
-                  <TableHead className="text-right text-yellow-400">Bloqueado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {balances.map((balance) => (
-                  <TableRow key={balance.asset} className="border-gray-700 hover:bg-gray-700/50">
-                    <TableCell className="font-medium">{balance.asset}</TableCell>
-                    <TableCell className="text-right">{parseFloat(balance.free).toFixed(8)}</TableCell>
-                    <TableCell className="text-right">{parseFloat(balance.locked).toFixed(8)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </div>
         )}
       </CardContent>
