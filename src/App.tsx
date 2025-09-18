@@ -8,6 +8,9 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import { AuthProvider } from "./context/AuthProvider";
 import ProtectedRoute from "./components/ProtectedRoute";
+import MainLayout from "./components/MainLayout";
+import ManualTrading from "./pages/ManualTrading";
+import SignalsTrading from "./pages/SignalsTrading";
 
 const queryClient = new QueryClient();
 
@@ -20,14 +23,20 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            
             <Route 
               path="/" 
               element={
                 <ProtectedRoute>
-                  <Index />
+                  <MainLayout />
                 </ProtectedRoute>
-              } 
-            />
+              }
+            >
+              <Route index element={<Index />} />
+              <Route path="manual-trading" element={<ManualTrading />} />
+              <Route path="signals-trading" element={<SignalsTrading />} />
+            </Route>
+
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
