@@ -51,12 +51,12 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const handleCloseTrade = async () => {
     setIsClosing(true);
     try {
-      // 1. Ejecutar la venta
+      // 1. Ejecutar la venta, indicando que se venda todo el saldo disponible
       const { data: sellOrder, error: functionError } = await supabase.functions.invoke('place-market-order', {
         body: {
           pair: trade.pair,
           side: 'SELL',
-          quantity: trade.asset_amount,
+          sellAllAvailable: true, // Nuevo parámetro
         },
       });
 
@@ -81,6 +81,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
       queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
       queryClient.invalidateQueries({ queryKey: ['activeTradesForSummary'] }); // Invalidar también el resumen
+      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] }); // Invalidar el resumen de Binance
     } catch (error: any) {
       showError(`Error al cerrar la operación de ${trade.pair}: ${error.message}`);
     } finally {

@@ -52,12 +52,12 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const handleCloseTrade = async () => {
     setIsClosing(true);
     try {
-      // 1. Ejecutar la venta
+      // 1. Ejecutar la venta, indicando que se venda todo el saldo disponible
       const { data: sellOrder, error: functionError } = await supabase.functions.invoke('place-market-order', {
         body: {
           pair: trade.pair,
           side: 'SELL',
-          quantity: trade.asset_amount,
+          sellAllAvailable: true, // Nuevo parámetro
         },
       });
 

@@ -43,7 +43,7 @@ serve(async (req) => {
     const { api_key, api_secret } = keys;
 
     // Lógica de la orden
-    const { pair, side, quantity, quoteOrderQty } = await req.json();
+    const { pair, side, quantity, quoteOrderQty, sellAllAvailable } = await req.json(); // Añadido sellAllAvailable
     if (!pair || !side) throw new Error('Los parámetros "pair" y "side" son obligatorios.');
 
     // Obtener información de intercambio para precisión y límites
@@ -60,16 +60,12 @@ serve(async (req) => {
       throw new Error(`Información de intercambio no encontrada para el símbolo ${pair}`);
     }
 
-    // Log para depuración: ver todos los filtros disponibles
-    console.log(`Exchange Info Filters for ${pair}:`, symbolInfo.filters);
-
     const quantityFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
     if (!quantityFilter) {
       throw new Error(`Filtro LOT_SIZE no encontrado para el símbolo ${pair}.`);
     }
 
     const minNotionalFilter = symbolInfo.filters.find((f: any) => f.filterType === 'MIN_NOTIONAL');
-    // Si MIN_NOTIONAL no se encuentra, asumimos 0 para evitar el error.
     const minNotional = minNotionalFilter ? parseFloat(minNotionalFilter.minNotional) : 0;
 
     const stepSize = parseFloat(quantityFilter.stepSize);
@@ -78,14 +74,41 @@ serve(async (req) => {
     let queryString = `symbol=${pair}&side=${side.toUpperCase()}&type=MARKET&timestamp=${Date.now()}`;
     
     if (side.toUpperCase() === 'BUY' && quoteOrderQty) {
-      // Validar y ajustar quoteOrderQty
       if (quoteOrderQty < minNotional) {
         throw new Error(`La cantidad de la orden en USDT (${quoteOrderQty}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
       }
       queryString += `&quoteOrderQty=${quoteOrderQty}`;
-    } else if (side.toUpperCase() === 'SELL' && quantity) {
+    } else if (side.toUpperCase() === 'SELL') {
+      let finalQuantity = quantity;
+
+      if (sellAllAvailable) {
+        // Obtener el balance actual del activo
+        const timestamp = Date.now();
+        const accountQueryString = `timestamp=${timestamp}`;
+        const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
+        const accountUrl = `https://api.binance.com/api/v3/account?${accountQueryString}&signature=${accountSignature}`;
+
+        const accountResponse = await fetch(accountUrl, {
+          method: 'GET',
+          headers: { 'X-MBX-APIKEY': api_key },
+        });
+        const accountData = await accountResponse.json();
+
+        if (!accountResponse.ok) {
+          throw new Error(`Error al obtener el balance de la cuenta de Binance: ${accountData.msg || 'Error desconocido'}`);
+        }
+
+        const baseAsset = pair.replace('USDT', ''); // Asume que el par es XXXUSDT
+        const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
+        
+        if (!assetBalance || parseFloat(assetBalance.free) === 0) {
+          throw new Error(`No hay saldo disponible de ${baseAsset} para vender.`);
+        }
+        finalQuantity = parseFloat(assetBalance.free);
+      }
+
       // Validar y ajustar quantity
-      let adjustedQuantity = adjustQuantity(quantity, stepSize);
+      let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
       if (adjustedQuantity < minQty) {
         throw new Error(`La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}.`);
       }
