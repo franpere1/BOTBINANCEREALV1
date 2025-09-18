@@ -83,7 +83,7 @@ serve(async (req) => {
   }
 
   try {
-    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'USDCUSDT']; // USDCUSDT añadido de nuevo
+    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'USDCUSDT'];
     const signalsData = [];
 
     for (const asset of assets) {
@@ -154,23 +154,63 @@ serve(async (req) => {
       // Volatility (using standard deviation of recent closing prices)
       const volatility = (stdDev / currentPrice) * 100; // Percentage volatility
 
-      // Simple signal logic (placeholder for ML prediction)
+      // --- Dynamic Signal and Confidence Logic ---
       let signal: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
       let confidence = 0;
 
-      if (rsi < 30 && macd > macdSignal && currentPrice > ma20) {
+      // Base conditions for BUY/SELL
+      const isBuySignal = rsi < 40 && macd > macdSignal && currentPrice > ma20;
+      const isSellSignal = rsi > 60 && macd < macdSignal && currentPrice < ma20;
+
+      if (isBuySignal) {
         signal = 'BUY';
-        confidence = 70;
-      } else if (rsi > 70 && macd < macdSignal && currentPrice < ma20) {
+        // Confidence for BUY
+        confidence += Math.min(30, (40 - rsi) * 1.5); // Stronger RSI -> higher confidence (max 30 points)
+        if (macd > macdSignal) {
+          confidence += Math.min(25, (macd - macdSignal) * 1000); // Stronger MACD crossover (max 25 points)
+        }
+        if (currentPrice > ma20) {
+          confidence += Math.min(20, ((currentPrice - ma20) / ma20) * 100 * 10); // Price above MA20 (max 20 points)
+        }
+        if (currentPrice > ma50) {
+          confidence += Math.min(15, ((currentPrice - ma50) / ma50) * 100 * 10); // Price above MA50 (max 15 points)
+        }
+        if (currentPrice < lowerBand) { // Price touching or below lower BB
+          confidence += 10; // Additional confidence for being oversold
+        }
+      } else if (isSellSignal) {
         signal = 'SELL';
-        confidence = 70;
-      } else if (macd > macdSignal) {
-        signal = 'BUY';
-        confidence = 50;
-      } else if (macd < macdSignal) {
-        signal = 'SELL';
-        confidence = 50;
+        // Confidence for SELL
+        confidence += Math.min(30, (rsi - 60) * 1.5); // Stronger RSI -> higher confidence (max 30 points)
+        if (macd < macdSignal) {
+          confidence += Math.min(25, (macdSignal - macd) * 1000); // Stronger MACD crossover (max 25 points)
+        }
+        if (currentPrice < ma20) {
+          confidence += Math.min(20, ((ma20 - currentPrice) / ma20) * 100 * 10); // Price below MA20 (max 20 points)
+        }
+        if (currentPrice < ma50) {
+          confidence += Math.min(15, ((ma50 - currentPrice) / ma50) * 100 * 10); // Price below MA50 (max 15 points)
+        }
+        if (currentPrice > upperBand) { // Price touching or above upper BB
+          confidence += 10; // Additional confidence for being overbought
+        }
+      } else {
+        signal = 'HOLD';
+        // Confidence for HOLD (reflects indecision or consolidation)
+        if (rsi >= 40 && rsi <= 60) {
+          confidence += Math.min(20, (10 - Math.abs(50 - rsi)) * 2); // Higher confidence if RSI is near 50
+        }
+        if (currentPrice > lowerBand && currentPrice < upperBand) { // Price within Bollinger Bands
+          confidence += 10;
+        }
+        // If MACD lines are very close
+        if (Math.abs(macd - macdSignal) < 0.01) {
+          confidence += 10;
+        }
       }
+
+      // Cap confidence at 100 and ensure it's not negative
+      confidence = Math.max(0, Math.min(100, confidence));
 
       signalsData.push({
         asset: asset,
