@@ -40,10 +40,10 @@ const ApiConfig = () => {
         setApiKey(data.api_key);
         setApiSecret('');
         setHasExistingKeys(true);
-        setIsEditing(false); // Claves existen, mostrar vista de confirmación
+        setIsEditing(false);
       } else {
         setHasExistingKeys(false);
-        setIsEditing(true); // No hay claves, ir directo al formulario
+        setIsEditing(true);
       }
       setIsLoading(false);
     };
@@ -58,33 +58,28 @@ const ApiConfig = () => {
       return;
     }
     
-    setIsSaving(true);
-    let error;
-
-    if (apiSecret) {
-      ({ error } = await supabase.from('api_keys').upsert({
-        user_id: user.id,
-        api_key: apiKey,
-        api_secret: apiSecret,
-      }));
-    } else if (hasExistingKeys) {
-      ({ error } = await supabase.from('api_keys').update({
-        api_key: apiKey,
-      }).eq('user_id', user.id));
-    } else {
-      showError('El API Secret es obligatorio la primera vez que guardas.');
-      setIsSaving(false);
+    if (!apiKey || !apiSecret) {
+      showError('Tanto la API Key como el API Secret son obligatorios.');
       return;
     }
+
+    setIsSaving(true);
+
+    const { error } = await supabase.from('api_keys').upsert({
+      user_id: user.id,
+      api_key: apiKey,
+      api_secret: apiSecret,
+    }, { onConflict: 'user_id' });
+
 
     if (error) {
       console.error('Error saving API keys:', error);
       showError('Hubo un error al guardar las claves.');
     } else {
       showSuccess('¡Claves guardadas con éxito!');
-      setApiSecret('');
+      setApiSecret(''); // Limpiar el secreto por seguridad después de guardar
       setHasExistingKeys(true);
-      setIsEditing(false); // Volver a la vista de confirmación
+      setIsEditing(false);
     }
     setIsSaving(false);
   };
@@ -112,7 +107,7 @@ const ApiConfig = () => {
         <CardTitle className="text-yellow-400">Configuración de API de Binance</CardTitle>
         <CardDescription className="text-gray-400">
           {isEditing
-            ? (hasExistingKeys ? "Actualiza tus claves de API aquí." : "Introduce tus claves para conectar tu cuenta.")
+            ? "Introduce o actualiza tus claves de API. El API Secret es siempre obligatorio."
             : "Tu cuenta de Binance está conectada."
           }
         </CardDescription>
@@ -138,11 +133,11 @@ const ApiConfig = () => {
               <Input
                 id="api-secret"
                 type="password"
-                placeholder={hasExistingKeys ? "Introduce un nuevo secreto para actualizar" : "Tu API Secret"}
+                placeholder="Introduce tu API Secret"
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
                 className="bg-gray-700 border-gray-600 text-white"
-                required={!hasExistingKeys}
+                required
               />
             </div>
           </CardContent>
