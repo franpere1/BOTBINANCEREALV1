@@ -5,8 +5,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthProvider';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 interface Trade {
   id: string;
@@ -38,42 +39,52 @@ const fetchTickerPrice = async (pair: string) => {
 
 const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const queryClient = useQueryClient();
-  const { data: currentPrice, isLoading } = useQuery({
+  const [isClosing, setIsClosing] = useState(false);
+  const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
 
+  const handleCloseTrade = async () => {
+    setIsClosing(true);
+    try {
+      // 1. Ejecutar la venta
+      const { data: sellOrder, error: sellError } = await supabase.functions.invoke('place-market-order', {
+        body: {
+          pair: trade.pair,
+          side: 'SELL',
+          quantity: trade.asset_amount,
+        },
+      });
+      if (sellError) throw sellError;
+
+      // 2. Actualizar la operación a 'completed'
+      const { error: updateError } = await supabase
+        .from('manual_trades')
+        .update({
+          status: 'completed',
+          binance_order_id_sell: sellOrder.orderId.toString(),
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', trade.id);
+      if (updateError) throw updateError;
+
+      showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
+      queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
+    } catch (error: any) {
+      showError(`Error al cerrar la operación de ${trade.pair}: ${error.message}`);
+    } finally {
+      setIsClosing(false);
+    }
+  };
+
   useEffect(() => {
     const checkTakeProfit = async () => {
       if (currentPrice && currentPrice >= trade.target_price) {
-        try {
-          // 1. Ejecutar la venta
-          const { data: sellOrder, error: sellError } = await supabase.functions.invoke('place-market-order', {
-            body: {
-              pair: trade.pair,
-              side: 'SELL',
-              quantity: trade.asset_amount,
-            },
-          });
-          if (sellError) throw sellError;
-
-          // 2. Actualizar la operación a 'completed'
-          const { error: updateError } = await supabase
-            .from('manual_trades')
-            .update({
-              status: 'completed',
-              binance_order_id_sell: sellOrder.orderId.toString(),
-              completed_at: new Date().toISOString(),
-            })
-            .eq('id', trade.id);
-          if (updateError) throw updateError;
-
-          showSuccess(`¡Venta de ${trade.pair} ejecutada en ganancia!`);
-          queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
-        } catch (error: any) {
-          showError(`Error al vender ${trade.pair}: ${error.message}`);
-        }
+        // Para evitar doble ejecución, solo cerramos si no se está cerrando manualmente
+        if (isClosing) return;
+        await handleCloseTrade();
       }
     };
 
@@ -90,9 +101,19 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       <TableCell className="text-gray-300">{trade.purchase_price.toFixed(4)}</TableCell>
       <TableCell className="text-yellow-400">{trade.target_price.toFixed(4)}</TableCell>
       <TableCell className="text-white">
-        {isLoading ? <Skeleton className="h-4 w-16" /> : currentPrice?.toFixed(4)}
+        {isLoadingPrice ? <Skeleton className="h-4 w-16" /> : currentPrice?.toFixed(4)}
       </TableCell>
       <TableCell className={pnlColor}>{pnl.toFixed(2)}%</TableCell>
+      <TableCell className="text-right">
+        <Button 
+          variant="destructive" 
+          size="sm" 
+          onClick={handleCloseTrade} 
+          disabled={isClosing}
+        >
+          {isClosing ? 'Cerrando...' : 'Cerrar'}
+        </Button>
+      </TableCell>
     </TableRow>
   );
 };
@@ -132,6 +153,7 @@ const ActiveTrades = () => {
           <TableHead className="text-white">Precio Objetivo</TableHead>
           <TableHead className="text-white">Precio Actual</TableHead>
           <TableHead className="text-white">Ganancia/Pérdida</TableHead>
+          <TableHead className="text-right text-white">Acción</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
