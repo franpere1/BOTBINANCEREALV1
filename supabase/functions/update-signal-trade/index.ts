@@ -31,43 +31,61 @@ serve(async (req) => {
     if (!user) throw new Error('Token inválido');
 
     // Lógica para actualizar la operación
-    const { tradeId, takeProfitPercentage, status } = await req.json();
+    const { tradeId, usdtAmount, takeProfitPercentage, status } = await req.json();
     if (!tradeId) throw new Error('El parámetro "tradeId" es obligatorio.');
 
     const updatePayload: {
+      usdt_amount?: number;
       take_profit_percentage?: number;
-      target_price?: number;
+      target_price?: number | null; // Puede ser null si no hay purchase_price
       status?: string;
     } = {};
 
-    // Si se proporciona takeProfitPercentage, recalcular target_price
-    if (takeProfitPercentage !== undefined) {
-      const { data: trade, error: fetchTradeError } = await supabaseAdmin
-        .from('signal_trades')
-        .select('purchase_price')
-        .eq('id', tradeId)
-        .eq('user_id', user.id)
-        .single();
+    // Obtener el trade actual para verificar el estado y purchase_price
+    const { data: existingTrade, error: fetchTradeError } = await supabaseAdmin
+      .from('signal_trades')
+      .select('purchase_price, status')
+      .eq('id', tradeId)
+      .eq('user_id', user.id)
+      .single();
 
-      if (fetchTradeError || !trade) {
-        throw new Error(`Operación no encontrada o no autorizada: ${fetchTradeError?.message || 'desconocido'}`);
-      }
-
-      if (!trade.purchase_price) {
-        throw new Error('No se puede actualizar el porcentaje de ganancia sin un precio de compra registrado.');
-      }
-
-      const purchasePrice = trade.purchase_price;
-      const newTargetPrice = (purchasePrice * (1 + takeProfitPercentage / 100)) / (1 - BINANCE_FEE_RATE);
-
-      updatePayload.take_profit_percentage = takeProfitPercentage;
-      updatePayload.target_price = newTargetPrice;
+    if (fetchTradeError || !existingTrade) {
+      throw new Error(`Operación no encontrada o no autorizada: ${fetchTradeError?.message || 'desconocido'}`);
     }
 
-    // Si se proporciona status, actualizarlo
+    // Solo permitir la edición de usdtAmount y takeProfitPercentage si el trade está en 'awaiting_buy_signal'
+    if (existingTrade.status === 'awaiting_buy_signal') {
+      if (usdtAmount !== undefined) {
+        updatePayload.usdt_amount = usdtAmount;
+      }
+      if (takeProfitPercentage !== undefined) {
+        updatePayload.take_profit_percentage = takeProfitPercentage;
+        // Si no hay purchase_price (está awaiting_buy_signal), target_price debe ser null
+        updatePayload.target_price = null; 
+      }
+    } else if (existingTrade.status === 'active' || existingTrade.status === 'paused') {
+      // Si el trade está activo o pausado, solo se puede actualizar takeProfitPercentage y recalcular target_price
+      if (takeProfitPercentage !== undefined) {
+        if (!existingTrade.purchase_price) {
+          throw new Error('No se puede actualizar el porcentaje de ganancia sin un precio de compra registrado.');
+        }
+        const purchasePrice = existingTrade.purchase_price;
+        const newTargetPrice = (purchasePrice * (1 + takeProfitPercentage / 100)) / (1 - BINANCE_FEE_RATE);
+
+        updatePayload.take_profit_percentage = takeProfitPercentage;
+        updatePayload.target_price = newTargetPrice;
+      }
+    } else {
+      // Para otros estados, no permitir edición de estos campos
+      if (usdtAmount !== undefined || takeProfitPercentage !== undefined) {
+        throw new Error(`No se pueden editar la cantidad o el porcentaje de ganancia para operaciones en estado '${existingTrade.status}'.`);
+      }
+    }
+
+    // Si se proporciona status, actualizarlo (esto es independiente de los otros campos)
     if (status !== undefined) {
-      if (!['active', 'paused', 'completed', 'error'].includes(status)) {
-        throw new Error('Estado inválido. Los estados permitidos son: active, paused, completed, error.');
+      if (!['active', 'paused', 'completed', 'error', 'awaiting_buy_signal'].includes(status)) {
+        throw new Error('Estado inválido. Los estados permitidos son: active, paused, completed, error, awaiting_buy_signal.');
       }
       updatePayload.status = status;
     }

@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
 import { useState } from 'react';
-import { AlertCircle, Trash2 } from 'lucide-react';
+import { AlertCircle, Trash2, Edit } from 'lucide-react'; // Importar el icono Edit
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
@@ -48,12 +48,14 @@ const fetchTickerPrice = async (pair: string) => {
 };
 
 const editFormSchema = z.object({
+  usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
   takeProfitPercentage: z.coerce.number().positive("El porcentaje debe ser mayor que 0."),
 });
 
 const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const queryClient = useQueryClient();
   const [isActionLoading, setIsActionLoading] = useState(false); // Para el estado de carga del botón de acción
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
   const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
@@ -62,7 +64,40 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
 
-  const handleAction = async () => {
+  const editForm = useForm<z.infer<typeof editFormSchema>>({
+    resolver: zodResolver(editFormSchema),
+    defaultValues: {
+      usdtAmount: trade.usdt_amount,
+      takeProfitPercentage: trade.take_profit_percentage,
+    },
+  });
+
+  const handleEditSubmit = async (values: z.infer<typeof editFormSchema>) => {
+    setIsActionLoading(true);
+    try {
+      const { data, error: functionError } = await supabase.functions.invoke('update-signal-trade', {
+        body: {
+          tradeId: trade.id,
+          usdtAmount: values.usdtAmount,
+          takeProfitPercentage: values.takeProfitPercentage,
+        },
+      });
+
+      if (functionError) throw functionError;
+      if (data.error) throw new Error(data.error);
+
+      showSuccess(`Monitoreo de ${trade.pair} actualizado con éxito.`);
+      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
+      setIsEditDialogOpen(false);
+    } catch (error: any) {
+      showError(`Error al actualizar el monitoreo de ${trade.pair}: ${error.message}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleDeleteOrClose = async () => {
     setIsActionLoading(true);
     try {
       if (trade.status === 'awaiting_buy_signal') {
@@ -115,7 +150,62 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       }`}>
         {trade.status === 'active' ? 'Activa' : trade.status === 'paused' ? 'Pausada' : 'Esperando Señal'}
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="text-right flex items-center justify-end space-x-2">
+        {isAwaitingSignal && (
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
+                <Edit className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
+              <DialogHeader>
+                <DialogTitle className="text-yellow-400">Editar Monitoreo de {trade.pair}</DialogTitle>
+                <DialogDescription className="text-gray-400">
+                  Actualiza la cantidad de USDT a invertir y el porcentaje de ganancia objetivo para este monitoreo.
+                </DialogDescription>
+              </DialogHeader>
+              <Form {...editForm}>
+                <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="grid gap-4 py-4">
+                  <FormField
+                    control={editForm.control}
+                    name="usdtAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Cantidad (USDT)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.01" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="takeProfitPercentage"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Ganancia Objetivo (%)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.1" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <DialogFooter className="mt-4">
+                    <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={isActionLoading} className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
+                      {isActionLoading ? 'Guardando...' : 'Guardar Cambios'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </DialogContent>
+          </Dialog>
+        )}
         <Dialog>
           <DialogTrigger asChild>
             <Button variant="destructive" size="sm" disabled={isActionLoading}>
@@ -138,7 +228,7 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
               <Button variant="outline" onClick={() => setIsActionLoading(false)} disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
                 Cancelar
               </Button>
-              <Button variant="destructive" onClick={handleAction} disabled={isActionLoading}>
+              <Button variant="destructive" onClick={handleDeleteOrClose} disabled={isActionLoading}>
                 {isActionLoading 
                   ? 'Procesando...' 
                   : (isAwaitingSignal ? 'Eliminar Monitoreo' : 'Cerrar Trade')

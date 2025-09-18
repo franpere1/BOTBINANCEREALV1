@@ -147,7 +147,7 @@ async function getMlSignalForAsset(asset: string) {
   } else if (rawScore <= -20) {
     signal = 'SELL';
   } else {
-    signal = 'HOLD';
+    confidence = 50 + (rawScore / 20) * 10;
   }
 
   if (signal === 'BUY') {
@@ -407,15 +407,35 @@ serve(async (req) => {
               throw new Error(`Binance sell order error: ${orderData.msg || 'Unknown error'}`);
             }
 
-            await supabaseAdmin
-              .from(tableName)
-              .update({
-                status: 'completed',
-                binance_order_id_sell: orderData.orderId.toString(),
-                completed_at: new Date().toISOString(),
-              })
-              .eq('id', trade.id);
-            console.log(`Trade ${trade.id} completed successfully.`);
+            // Si la operación es manual, se marca como completada y no se reinicia.
+            // Si es de señal, se reinicia para el siguiente ciclo de monitoreo.
+            if (tableName === 'manual_trades') {
+              await supabaseAdmin
+                .from(tableName)
+                .update({
+                  status: 'completed',
+                  binance_order_id_sell: orderData.orderId.toString(),
+                  completed_at: new Date().toISOString(),
+                })
+                .eq('id', trade.id);
+              console.log(`Manual trade ${trade.id} completed successfully.`);
+            } else { // tableName === 'signal_trades'
+              await supabaseAdmin
+                .from(tableName)
+                .update({
+                  status: 'awaiting_buy_signal', // Reiniciar para monitoreo recurrente
+                  binance_order_id_sell: orderData.orderId.toString(),
+                  completed_at: new Date().toISOString(), // Mantener el registro de cuándo se completó el ciclo
+                  asset_amount: null,
+                  purchase_price: null,
+                  target_price: null,
+                  binance_order_id_buy: null,
+                  error_message: null,
+                  // created_at se mantiene para saber cuándo se inició el monitoreo original
+                })
+                .eq('id', trade.id);
+              console.log(`Signal trade ${trade.id} completed and reset to 'awaiting_buy_signal' for recurrence.`);
+            }
           }
         }
       } catch (tradeError: any) {
@@ -432,7 +452,6 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
-
   } catch (error) {
     console.error('Unhandled error in monitor-trades Edge Function:', error);
     return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
