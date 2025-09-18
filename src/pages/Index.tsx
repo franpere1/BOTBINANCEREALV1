@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import ApiConfig from "@/components/ApiConfig";
+import BalanceDisplay from "@/components/BalanceDisplay";
 import { MadeWithDyad } from "@/components/made-with-dyad";
 
 const Index = () => {
@@ -16,7 +17,10 @@ const Index = () => {
             </p>
         </div>
         
-        <ApiConfig />
+        <div className="space-y-8">
+          <ApiConfig />
+          <BalanceDisplay />
+        </div>
 
       </main>
       <div className="absolute bottom-0 w-full">
