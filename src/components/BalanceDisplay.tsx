@@ -5,72 +5,58 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showError, showSuccess } from '@/utils/toast';
-import { Wallet } from 'lucide-react';
-
-type Balance = {
-  asset: string;
-  free: string;
-  locked: string;
-};
+import { Wallet, CheckCircle } from 'lucide-react';
 
 const BalanceDisplay = () => {
   const { session } = useAuth();
-  const [balances, setBalances] = useState<Balance[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasFetched, setHasFetched] = useState(false);
+  const [testMessage, setTestMessage] = useState<string | null>(null);
 
-  const fetchBalance = async () => {
+  const runServerTest = async () => {
     if (!session) {
-      showError("Debes iniciar sesión para consultar tu saldo.");
+      showError("Debes iniciar sesión para realizar la prueba.");
       return;
     }
 
     setIsLoading(true);
     setError(null);
-    setHasFetched(true);
+    setTestMessage(null);
 
     const { data, error: functionError } = await supabase.functions.invoke('get-binance-balance');
 
     setIsLoading(false);
 
     if (functionError) {
-      console.error('Error invoking function:', functionError);
-      
-      // MODO DEPURACIÓN: Mostrar el error técnico completo
+      console.error('Error invoking test function:', functionError);
       const rawErrorString = JSON.stringify(functionError, null, 2);
-      const detailedErrorMessage = `Error técnico: ${rawErrorString}`;
-
+      const detailedErrorMessage = `Error técnico en la prueba: ${rawErrorString}`;
       setError(detailedErrorMessage);
-      showError('Error al obtener el saldo. Revisa los detalles en pantalla.');
-      setBalances([]);
+      showError('La prueba de conexión falló. Revisa los detalles.');
     } else {
-      setBalances(data.balances);
-      showSuccess('Saldo actualizado correctamente.');
+      setTestMessage(data.message);
+      showSuccess('¡Prueba de conexión exitosa!');
     }
   };
 
   return (
     <Card className="w-full max-w-md mx-auto bg-gray-800 border-gray-700">
       <CardHeader>
-        <CardTitle className="text-yellow-400">Saldo de la Cuenta</CardTitle>
+        <CardTitle className="text-yellow-400">Diagnóstico del Servidor</CardTitle>
         <CardDescription className="text-gray-400">
-          Consulta el saldo de tu cuenta de Binance en tiempo real.
+          Ejecuta una prueba de conexión con el servidor para verificar el estado.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button onClick={fetchBalance} disabled={isLoading} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
+        <Button onClick={runServerTest} disabled={isLoading} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
           <Wallet className="mr-2 h-4 w-4" />
-          {isLoading ? 'Consultando...' : 'Consultar Saldo'}
+          {isLoading ? 'Ejecutando prueba...' : 'Iniciar Prueba de Conexión'}
         </Button>
 
         {isLoading && (
           <div className="mt-4 space-y-2">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-full" />
           </div>
         )}
@@ -81,32 +67,10 @@ const BalanceDisplay = () => {
           </div>
         )}
 
-        {!isLoading && !error && hasFetched && balances.length === 0 && (
-            <div className="mt-4 text-center text-gray-400 bg-gray-900/50 p-3 rounded-md">
-                <p>No se encontraron saldos o todas las monedas tienen balance cero.</p>
-            </div>
-        )}
-
-        {!isLoading && !error && balances.length > 0 && (
-          <div className="mt-4 overflow-x-auto">
-            <Table className="text-white">
-              <TableHeader>
-                <TableRow className="border-gray-700 hover:bg-gray-700/50">
-                  <TableHead className="text-yellow-400">Activo</TableHead>
-                  <TableHead className="text-right text-yellow-400">Disponible</TableHead>
-                  <TableHead className="text-right text-yellow-400">Bloqueado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {balances.map((balance) => (
-                  <TableRow key={balance.asset} className="border-gray-700 hover:bg-gray-700/50">
-                    <TableCell className="font-medium">{balance.asset}</TableCell>
-                    <TableCell className="text-right">{parseFloat(balance.free).toFixed(8)}</TableCell>
-                    <TableCell className="text-right">{parseFloat(balance.locked).toFixed(8)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+        {testMessage && !isLoading && (
+          <div className="mt-4 flex items-center p-4 bg-green-900/50 rounded-md border border-green-700">
+            <CheckCircle className="h-6 w-6 text-green-400 mr-4 flex-shrink-0" />
+            <p className="text-green-300">{testMessage}</p>
           </div>
         )}
       </CardContent>
