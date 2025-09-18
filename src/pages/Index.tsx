@@ -1,9 +1,7 @@
 import Header from "@/components/Header";
 import ApiConfig from "@/components/ApiConfig";
 import BalanceDisplay from "@/components/BalanceDisplay";
-import DirectBalanceTest from "@/components/DirectBalanceTest";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { Separator } from "@/components/ui/separator";
 
 const Index = () => {
   return (
@@ -22,13 +20,6 @@ const Index = () => {
         <div className="space-y-8">
           <ApiConfig />
           <BalanceDisplay />
-          <div className="relative my-8">
-            <Separator className="bg-gray-600" />
-            <span className="absolute left-1/2 -translate-x-1/2 -top-3 bg-gray-900 px-2 text-sm text-gray-400">
-              Prueba Alternativa
-            </span>
-          </div>
-          <DirectBalanceTest />
         </div>
 
       </main>
