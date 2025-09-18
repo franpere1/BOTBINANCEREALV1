@@ -17,6 +17,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useState } from 'react';
+import { Badge } from '@/components/ui/badge'; // Importar Badge
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'; // Importar Tooltip
 
 interface SignalData {
   asset: string;
@@ -191,6 +193,12 @@ const SignalsTrading = () => {
     }
   };
 
+  const getConfidenceVariant = (confidence: number) => {
+    if (confidence >= 70) return 'default'; // Verde oscuro
+    if (confidence >= 50) return 'secondary'; // Amarillo
+    return 'outline'; // Gris
+  };
+
   const buySignals70Plus = signals?.filter(s => s.signal === 'BUY' && s.confidence >= 70) || [];
 
   return (
@@ -252,7 +260,7 @@ const SignalsTrading = () => {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-gray-300">Activos para Operar (BUY >= 70% Confianza)</FormLabel>
-                      <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2"> {/* Añadido scroll y padding */}
                         {buySignals70Plus.length > 0 ? (
                           buySignals70Plus.map((signal) => (
                             <FormField
@@ -308,24 +316,37 @@ const SignalsTrading = () => {
         {signals?.map((signal) => (
           <Card key={signal.asset} className="bg-gray-800 border-gray-700 text-white">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xl text-yellow-400">{signal.asset}</CardTitle>
-              <CardDescription className="flex items-center text-lg font-semibold">
+              <CardTitle className="text-2xl text-yellow-400 flex items-center justify-between">
+                {signal.asset}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant={getConfidenceVariant(signal.confidence)} className="text-sm px-3 py-1">
+                      {signal.confidence.toFixed(1)}% Confianza
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-gray-700 text-white border-gray-600">
+                    <p>Nivel de confianza de la señal de ML.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </CardTitle>
+              <CardDescription className={`flex items-center text-xl font-bold ${getSignalColor(signal.signal)} mt-1`}>
                 {getSignalIcon(signal.signal)}
-                <span className={getSignalColor(signal.signal)}>{signal.signal}</span>
+                {signal.signal}
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-sm space-y-1">
-              <p className="text-gray-400">Confianza: <span className="text-white font-semibold">{signal.confidence.toFixed(1)}%</span></p>
-              <p className="text-gray-400">Precio: <span className="text-white font-semibold">${signal.price.toFixed(4)}</span></p>
-              <p className="text-gray-400">RSI: <span className="text-white font-semibold">{signal.rsi.toFixed(2)}</span></p>
-              <p className="text-gray-400">MA20: <span className="text-white font-semibold">${signal.ma20.toFixed(4)}</span></p>
-              <p className="text-gray-400">MA50: <span className="text-white font-semibold">${signal.ma50.toFixed(4)}</span></p>
-              <p className="text-gray-400">MACD: <span className="text-white font-semibold">{signal.macd.toFixed(3)}</span></p>
-              <p className="text-gray-400">MACD Señal: <span className="text-white font-semibold">{signal.macdSignal.toFixed(3)}</span></p>
-              <p className="text-gray-400">Hist. MACD: <span className="text-white font-semibold">{signal.histMacd.toFixed(3)}</span></p>
-              <p className="text-gray-400">Banda Superior: <span className="text-white font-semibold">${signal.upperBand.toFixed(4)}</span></p>
-              <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
-              <p className="text-gray-400">Volatilidad: <span className="text-white font-semibold">{signal.volatility.toFixed(2)}%</span></p>
+            <CardContent className="text-sm space-y-2">
+              <p className="text-gray-400">Precio Actual: <span className="text-white font-semibold">${signal.price.toFixed(4)}</span></p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <p className="text-gray-400">RSI: <span className="text-white font-semibold">{signal.rsi.toFixed(2)}</span></p>
+                <p className="text-gray-400">Volatilidad: <span className="text-white font-semibold">{signal.volatility.toFixed(2)}%</span></p>
+                <p className="text-gray-400">MA20: <span className="text-white font-semibold">${signal.ma20.toFixed(4)}</span></p>
+                <p className="text-gray-400">MA50: <span className="text-white font-semibold">${signal.ma50.toFixed(4)}</span></p>
+                <p className="text-gray-400">MACD: <span className="text-white font-semibold">{signal.macd.toFixed(3)}</span></p>
+                <p className="text-gray-400">MACD Señal: <span className="text-white font-semibold">{signal.macdSignal.toFixed(3)}</span></p>
+                <p className="text-gray-400">Hist. MACD: <span className="text-white font-semibold">{signal.histMacd.toFixed(3)}</span></p>
+                <p className="text-gray-400">Banda Superior: <span className="text-white font-semibold">${signal.upperBand.toFixed(4)}</span></p>
+                <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
+              </div>
               <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
             </CardContent>
           </Card>
