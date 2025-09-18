@@ -11,6 +11,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import MainLayout from "./components/MainLayout";
 import ManualTrading from "./pages/ManualTrading";
 import SignalsTrading from "./pages/SignalsTrading";
+import TradeHistory from "./pages/TradeHistory"; // Importar la nueva página
 
 const queryClient = new QueryClient();
 
@@ -35,6 +36,7 @@ const App = () => (
               <Route index element={<Index />} />
               <Route path="manual-trading" element={<ManualTrading />} />
               <Route path="signals-trading" element={<SignalsTrading />} />
+              <Route path="trade-history" element={<TradeHistory />} /> {/* Nueva ruta */}
             </Route>
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

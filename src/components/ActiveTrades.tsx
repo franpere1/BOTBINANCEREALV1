@@ -17,7 +17,7 @@ interface Trade {
   purchase_price: number;
   target_price: number;
   take_profit_percentage: number;
-  created_at: string;
+  created_at: string; // Añadido created_at
 }
 
 const fetchActiveTrades = async (userId: string) => {
@@ -91,7 +91,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
     };
 
     checkTakeProfit();
-  }, [currentPrice, trade, queryClient]);
+  }, [currentPrice, trade, queryClient, isClosing, handleCloseTrade]); // Añadir isClosing y handleCloseTrade a las dependencias
 
   const pnl = currentPrice ? ((currentPrice - trade.purchase_price) / trade.purchase_price) * 100 : 0;
   const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';

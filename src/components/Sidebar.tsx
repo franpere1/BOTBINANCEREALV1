@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Hand, Signal, Home } from 'lucide-react';
+import { Hand, Signal, Home, History } from 'lucide-react'; // Importar el icono History
 import { cn } from '@/lib/utils';
 
 const Sidebar = () => {
@@ -51,6 +51,20 @@ const Sidebar = () => {
             >
               <Signal className="mr-3 h-5 w-5" />
               Trading por Señales
+            </NavLink>
+          </li>
+          <li> {/* Nuevo enlace para el historial */}
+            <NavLink
+              to="/trade-history"
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center p-2 rounded-md hover:bg-gray-700 transition-colors font-medium",
+                  isActive ? "bg-yellow-500 text-gray-900" : "text-gray-300"
+                )
+              }
+            >
+              <History className="mr-3 h-5 w-5" />
+              Historial de Operaciones
             </NavLink>
           </li>
         </ul>
