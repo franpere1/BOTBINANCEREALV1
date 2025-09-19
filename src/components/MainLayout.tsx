@@ -7,7 +7,12 @@ const MainLayout = () => {
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       <Header />
       <div className="flex flex-1">
-        <Sidebar />
+        <aside className="w-64 bg-gray-800 text-white flex-col border-r border-gray-700 hidden md:flex"> {/* Ocultar en móviles */}
+          <div className="p-4 border-b border-gray-700">
+            <h2 className="text-xl font-bold text-yellow-400">Menú</h2>
+          </div>
+          <Sidebar />
+        </aside>
         <main className="flex-1 p-4 sm:p-8 overflow-y-auto">
           <Outlet />
         </main>
