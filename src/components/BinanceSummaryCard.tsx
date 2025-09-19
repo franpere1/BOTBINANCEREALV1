@@ -20,14 +20,15 @@ interface TickerPrice {
   price: string;
 }
 
-interface ActiveTrade {
+interface Trade {
   id: string;
   pair: string;
   usdt_amount: number;
-  asset_amount: number;
-  purchase_price: number;
-  target_price: number;
+  asset_amount: number | null;
+  purchase_price: number | null;
+  target_price: number | null;
   created_at: string;
+  status: string;
 }
 
 const fetchBinanceAccountSummary = async () => {
@@ -36,14 +37,25 @@ const fetchBinanceAccountSummary = async () => {
   return data;
 };
 
-const fetchActiveTrades = async (userId: string) => {
-  const { data, error } = await supabase
+const fetchAllActiveTrades = async (userId: string) => {
+  const { data: manualTrades, error: manualError } = await supabase
     .from('manual_trades')
-    .select('*')
+    .select('id, pair, usdt_amount, asset_amount, purchase_price, target_price, created_at, status')
     .eq('user_id', userId)
-    .eq('status', 'active');
-  if (error) throw new Error(error.message);
-  return data;
+    .in('status', ['active', 'paused']); // Incluir pausadas si tienen activos
+
+  if (manualError) throw new Error(manualError.message);
+
+  const { data: signalTrades, error: signalError } = await supabase
+    .from('signal_trades')
+    .select('id, pair, usdt_amount, asset_amount, purchase_price, target_price, created_at, status')
+    .eq('user_id', userId)
+    .in('status', ['active', 'paused']); // Incluir pausadas si tienen activos
+
+  if (signalError) throw new Error(signalError.message);
+
+  // Combinar y devolver todas las operaciones activas o pausadas
+  return [...(manualTrades || []), ...(signalTrades || [])];
 };
 
 const BinanceSummaryCard = () => {
@@ -57,8 +69,8 @@ const BinanceSummaryCard = () => {
   });
 
   const { data: activeTrades, isLoading: isLoadingTrades, isError: isErrorTrades } = useQuery({
-    queryKey: ['activeTradesForSummary'],
-    queryFn: () => fetchActiveTrades(user!.id),
+    queryKey: ['allActiveTradesForSummary'], // Cambiar la clave de la query
+    queryFn: () => fetchAllActiveTrades(user!.id),
     enabled: !!user,
     refetchInterval: 30000, // Actualizar cada 30 segundos
   });
@@ -89,7 +101,7 @@ const BinanceSummaryCard = () => {
 
   const balances: Balance[] = summaryData?.balances || [];
   const tickerPrices: TickerPrice[] = summaryData?.tickerPrices || [];
-  const trades: ActiveTrade[] = activeTrades || [];
+  const trades: Trade[] = activeTrades || [];
 
   const getPrice = (symbol: string): number => {
     const ticker = tickerPrices.find(t => t.symbol === symbol);
@@ -117,7 +129,7 @@ const BinanceSummaryCard = () => {
     }
   });
 
-  // Calcular Capital Usado y P/L Flotante de operaciones activas
+  // Calcular Capital Usado y P/L Flotante de TODAS las operaciones activas/pausadas
   trades.forEach(trade => {
     capitalUsed += trade.usdt_amount;
     const currentPrice = getPrice(trade.pair);
