@@ -65,14 +65,14 @@ const BinanceSummaryCard = () => {
     queryKey: ['binanceAccountSummary'],
     queryFn: fetchBinanceAccountSummary,
     enabled: !!user,
-    refetchInterval: 30000, // Actualizar cada 30 segundos
+    refetchInterval: 10000, // Actualizar cada 10 segundos para mayor consistencia
   });
 
   const { data: activeTrades, isLoading: isLoadingTrades, isError: isErrorTrades } = useQuery({
-    queryKey: ['allActiveTradesForSummary'], // Cambiar la clave de la query
+    queryKey: ['allActiveTradesForSummary'],
     queryFn: () => fetchAllActiveTrades(user!.id),
     enabled: !!user,
-    refetchInterval: 30000, // Actualizar cada 30 segundos
+    refetchInterval: 10000, // Actualizar cada 10 segundos para mayor consistencia
   });
 
   if (isErrorSummary) {
@@ -134,7 +134,9 @@ const BinanceSummaryCard = () => {
     capitalUsed += trade.usdt_amount;
     const currentPrice = getPrice(trade.pair);
     if (currentPrice > 0 && trade.asset_amount && trade.purchase_price) {
-      floatingPnL += (currentPrice - trade.purchase_price) * trade.asset_amount;
+      const tradePnL = (currentPrice - trade.purchase_price) * trade.asset_amount;
+      floatingPnL += tradePnL;
+      console.log(`[BinanceSummaryCard] Trade ${trade.id} (${trade.pair}): P/L = ${tradePnL.toFixed(4)} USD`); // Log para depuración
     }
   });
 
