@@ -9,6 +9,7 @@ import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play, Trash2 } from
 import { showError, showSuccess } from '@/utils/toast';
 import { useAuth } from '@/context/AuthProvider';
 import ActiveSignalTrades from '@/components/ActiveSignalTrades';
+import MinutePriceCollectorStatus from '@/components/MinutePriceCollectorStatus'; // Importar el nuevo componente
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -287,7 +288,7 @@ const SignalsTrading = () => {
                 <FormField
                   control={form.control}
                   name="selectedAssets"
-                  render={({ field }) => (
+                  render={({ field: innerField }) => (
                     <FormItem>
                       <FormLabel className="text-gray-300">Activos para Monitorear</FormLabel>
                       <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
@@ -297,17 +298,17 @@ const SignalsTrading = () => {
                               key={signal.asset}
                               control={form.control}
                               name="selectedAssets"
-                              render={({ field: innerField }) => {
+                              render={({ field }) => {
                                 return (
                                   <FormItem className="flex flex-row items-start space-x-3 space-y-0">
                                     <FormControl>
                                       <Checkbox
-                                        checked={innerField.value?.includes(signal.asset)}
+                                        checked={field.value?.includes(signal.asset)}
                                         onCheckedChange={(checked) => {
                                           return checked
-                                            ? innerField.onChange([...innerField.value, signal.asset])
-                                            : innerField.onChange(
-                                                innerField.value?.filter(
+                                            ? field.onChange([...field.value, signal.asset])
+                                            : field.onChange(
+                                                field.value?.filter(
                                                   (value) => value !== signal.asset
                                                 )
                                               );
@@ -341,6 +342,8 @@ const SignalsTrading = () => {
           </DialogContent>
         </Dialog>
       </div>
+
+      <MinutePriceCollectorStatus /> {/* Nuevo componente aquí */}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {signals?.map((signal) => {
