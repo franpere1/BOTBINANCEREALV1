@@ -16,6 +16,7 @@ serve(async (req) => {
     // 1. Autenticar al usuario
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
+      console.error('Missing authorization header');
       return new Response(JSON.stringify({ error: 'Missing authorization header' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     const token = authHeader.replace('Bearer ', '');
@@ -28,6 +29,7 @@ serve(async (req) => {
 
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) {
+      console.error('Invalid token or user not found:', userError?.message);
       return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -39,6 +41,7 @@ serve(async (req) => {
       .single();
 
     if (keysError || !keys) {
+      console.error('API keys not found for user:', user.id, keysError?.message);
       return new Response(JSON.stringify({ error: 'API keys not found for this user.' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -50,6 +53,7 @@ serve(async (req) => {
     const signature = new HmacSha256(api_secret).update(queryString).toString();
     
     const url = `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`;
+    console.log(`[get-binance-balance] Attempting to fetch from Binance URL: ${url}`);
 
     // 5. Realizar la llamada a la API de Binance
     const response = await fetch(url, {
@@ -60,20 +64,24 @@ serve(async (req) => {
     });
 
     const responseData = await response.json();
+    console.log(`[get-binance-balance] Binance API response status: ${response.status}`);
+    console.log(`[get-binance-balance] Binance API response data:`, responseData);
 
     if (!response.ok) {
+      console.error(`Binance API error: ${responseData.msg || 'Error desconocido'}`, responseData);
       return new Response(JSON.stringify({ error: `Binance API error: ${responseData.msg}`, details: responseData }), { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // 6. Filtrar y devolver los balances que no son cero
     const balances = responseData.balances.filter((b: any) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0);
+    console.log(`[get-binance-balance] Filtered balances:`, balances);
 
     return new Response(JSON.stringify(balances), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Unhandled error in Edge Function:', error);
     return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
