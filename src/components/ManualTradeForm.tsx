@@ -12,6 +12,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthProvider';
 import { showError, showSuccess } from '@/utils/toast';
 import { useQueryClient } from '@tanstack/react-query';
+import { useIsMobile } from '@/hooks/use-mobile'; // Import useIsMobile
+import { // Import Drawer components
+  Drawer,
+  DrawerContent,
+  DrawerTrigger,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerFooter,
+  DrawerClose,
+} from '@/components/ui/drawer'; 
 
 const topPairs = [
   'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
@@ -31,6 +42,8 @@ const ManualTradeForm = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isMobile = useIsMobile(); // Use the hook
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false); // State for drawer
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -124,16 +137,70 @@ const ManualTradeForm = () => {
           render={({ field }) => (
             <FormItem>
               <FormLabel className="text-gray-300">Par</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
-                    <SelectValue placeholder="Selecciona un par" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent className="bg-gray-700 border-gray-600 text-white">
-                  {topPairs.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {isMobile ? (
+                <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
+                  <DrawerTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between bg-gray-700 border-gray-600 text-white">
+                      {field.value ? field.value : "Selecciona un par"}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="lucide lucide-chevrons-up-down ml-2 h-4 w-4 shrink-0 opacity-50"
+                      >
+                        <path d="m7 15 5 5 5-5" />
+                        <path d="m7 9 5-5 5 5" />
+                      </svg>
+                    </Button>
+                  </DrawerTrigger>
+                  <DrawerContent className="bg-gray-800 text-white border-gray-700">
+                    <DrawerHeader>
+                      <DrawerTitle className="text-yellow-400">Selecciona un Par</DrawerTitle>
+                      <DrawerDescription className="text-gray-400">
+                        Elige el par de criptomonedas para tu operación.
+                      </DrawerDescription>
+                    </DrawerHeader>
+                    <div className="p-4 overflow-y-auto max-h-[70vh]">
+                      {topPairs.map(p => (
+                        <div
+                          key={p}
+                          className="flex items-center p-3 mb-2 rounded-md cursor-pointer hover:bg-gray-700 transition-colors"
+                          onClick={() => {
+                            field.onChange(p);
+                            setIsDrawerOpen(false);
+                          }}
+                        >
+                          <span className="text-white">{p}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <DrawerFooter>
+                      <DrawerClose asChild>
+                        <Button variant="outline" className="bg-gray-700 border-gray-600 text-white hover:bg-gray-600">
+                          Cerrar
+                        </Button>
+                      </DrawerClose>
+                    </DrawerFooter>
+                  </DrawerContent>
+                </Drawer>
+              ) : (
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl>
+                    <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                      <SelectValue placeholder="Selecciona un par" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent className="bg-gray-700 border-gray-600 text-white">
+                    {topPairs.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
               <FormMessage />
             </FormItem>
           )}
