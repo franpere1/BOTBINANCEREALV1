@@ -10,8 +10,8 @@ const corsHeaders = {
 // Helper para ajustar la cantidad a la precisión del stepSize de Binance
 const adjustQuantity = (qty: number, step: number) => {
   // Calcula el número de pasos y luego multiplica por el stepSize para asegurar la precisión
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  return parseFloat(qty.toFixed(precision));
+  const numSteps = Math.floor(qty / step);
+  return numSteps * step;
 };
 
 serve(async (req) => {
