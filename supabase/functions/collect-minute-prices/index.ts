@@ -93,7 +93,7 @@ serve(async (req) => {
             .select('id')
             .eq('asset', asset)
             .order('created_at', { ascending: true })
-            .limit(count - retentionLimit);
+            .limit(count - retentionLimit); // Esto borrará 50 registros cuando count sea 350
 
           if (fetchOldestError) {
             console.error(`[${functionName}] Error fetching oldest records for ${asset}:`, fetchOldestError);
