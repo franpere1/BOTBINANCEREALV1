@@ -79,11 +79,10 @@ const StrategicPurchases = () => {
               <div className="flex-1 w-full">
                 <Label htmlFor="pair-select" className="text-gray-300">Selecciona un Par</Label>
                 <Select onValueChange={setSelectedPair} defaultValue={selectedPair}>
-                  <FormControl>
-                    <SelectTrigger id="pair-select" className="w-full bg-gray-700 border-gray-600 text-white">
-                      <SelectValue placeholder="Selecciona un par" />
-                    </SelectTrigger>
-                  </FormControl>
+                  {/* Eliminado FormControl, ya que no es necesario para un Select simple */}
+                  <SelectTrigger id="pair-select" className="w-full bg-gray-700 border-gray-600 text-white">
+                    <SelectValue placeholder="Selecciona un par" />
+                  </SelectTrigger>
                   <SelectContent className="bg-gray-700 border-gray-600 text-white">
                     {topPairs.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                   </SelectContent>
