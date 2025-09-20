@@ -18,6 +18,8 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const functionName = 'delete-signal-trade';
+
   try {
     // Autenticación y obtención de claves de API
     const authHeader = req.headers.get('Authorization');
@@ -111,19 +113,24 @@ serve(async (req) => {
         const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
         const actualFreeBalance = assetBalance ? parseFloat(assetBalance.free) : 0;
         
-        let quantityToSell = trade.asset_amount; // Cantidad deseada a vender (la que se compró para este trade)
-
-        if (actualFreeBalance === 0) {
-          binanceErrorMessage = `No hay saldo disponible de ${baseAsset} en Binance para vender al eliminar la operación ${tradeId}.`;
-          console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
-        } else if (quantityToSell > actualFreeBalance) {
-          // Si la cantidad registrada en el trade es mayor que el saldo libre, vender el máximo disponible
-          binanceErrorMessage = `Saldo insuficiente de ${baseAsset} en Binance. Se intentará vender el máximo disponible (${actualFreeBalance.toFixed(8)}) al eliminar la operación ${tradeId}.`;
-          console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
-          quantityToSell = actualFreeBalance;
+        // Determine the actual quantity to attempt to sell
+        let quantityToSell = 0;
+        if (actualFreeBalance > 0) {
+            // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
+            quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
+            
+            // Add a small safety margin to avoid "insufficient balance" errors due to tiny discrepancies or race conditions
+            // This might leave a small amount of dust, but increases reliability of the sell order.
+            // Only apply if quantityToSell is not already very small.
+            if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
+                quantityToSell *= 0.999; // Reduce by 0.1%
+            }
         }
 
-        if (quantityToSell > 0) { // Solo proceder con la orden de venta si hay algo que vender
+        if (quantityToSell === 0) {
+          binanceErrorMessage = `No hay saldo disponible de ${baseAsset} en Binance para vender o la cantidad es demasiado pequeña para ${trade.pair}.`;
+          console.warn(`[${functionName}] ${binanceErrorMessage}`);
+        } else {
           // Obtener el precio actual para verificar MIN_NOTIONAL en ventas
           const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${trade.pair}`;
           const tickerPriceResponse = await fetch(tickerPriceUrl);
@@ -136,12 +143,12 @@ serve(async (req) => {
           let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
 
           if (adjustedQuantity < minQty) {
-            console.warn(`[DELETE-TRADE] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`);
+            console.warn(`[${functionName}] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`);
             binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Cantidad de venta (${adjustedQuantity}) menor que la mínima (${minQty}). No se realizó la venta.`;
           } else {
             const notionalValue = adjustedQuantity * currentPrice;
             if (notionalValue < minNotional) {
-              console.warn(`[DELETE-TRADE] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta.`);
+              console.warn(`[${functionName}] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta.`);
               binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Valor nocional de venta (${notionalValue.toFixed(8)}) menor que el mínimo (${minNotional}). No se realizó la venta.`;
             } else {
               // Ejecutar la orden de venta en Binance
@@ -158,19 +165,19 @@ serve(async (req) => {
 
               if (!sellResponse.ok) {
                 binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error de Binance al vender activos para eliminar la operación: ${sellOrderData.msg || 'Error desconocido'}`;
-                console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
+                console.warn(`[${functionName}] ${binanceErrorMessage}`);
               } else {
-                console.log(`[DELETE-TRADE] Activos de la operación ${tradeId} vendidos en Binance.`);
+                console.log(`[${functionName}] Activos de la operación ${tradeId} vendidos en Binance.`);
               }
             }
           }
         }
       } catch (sellAttemptError: any) {
         binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance para eliminación: ${sellAttemptError.message}`;
-        console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
+        console.warn(`[${functionName}] ${binanceErrorMessage}`);
       }
     } else if (trade.status === 'awaiting_buy_signal') {
-      console.log(`[DELETE-TRADE] Trade ${tradeId} está esperando una señal de compra. No hay activos para vender.`);
+      console.log(`[${functionName}] Trade ${tradeId} está esperando una señal de compra. No hay activos para vender.`);
     }
 
     // 3. Siempre eliminar el registro de la base de datos
@@ -195,7 +202,7 @@ serve(async (req) => {
     });
 
   } catch (error: any) {
-    console.error('Error en la Edge Function delete-signal-trade:', error);
+    console.error(`Error en la Edge Function ${functionName}:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500, 

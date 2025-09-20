@@ -19,6 +19,8 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const functionName = 'close-trade';
+
   try {
     // Autenticación y obtención de claves de API
     const authHeader = req.headers.get('Authorization');
@@ -48,7 +50,7 @@ serve(async (req) => {
     if (!tradeId || !tradeType) throw new Error('Los parámetros "tradeId" y "tradeType" son obligatorios.');
 
     const tableName = tradeType === 'manual' ? 'manual_trades' : 'signal_trades';
-    console.log(`[CLOSE-TRADE] Processing trade ${tradeId} of type ${tradeType} from table ${tableName}.`);
+    console.log(`[${functionName}] Processing trade ${tradeId} of type ${tradeType} from table ${tableName}.`);
 
     // 1. Obtener los detalles de la operación
     const { data: trade, error: fetchTradeError } = await supabaseAdmin
@@ -64,7 +66,7 @@ serve(async (req) => {
 
     const { pair } = trade;
     const baseAsset = pair.replace('USDT', '');
-    console.log(`[CLOSE-TRADE] Trade ${tradeId} for pair ${pair}. Base Asset: ${baseAsset}`);
+    console.log(`[${functionName}] Trade ${tradeId} for pair ${pair}. Base Asset: ${baseAsset}`);
 
     let binanceSellOrderId: string | null = null;
     let binanceErrorMessage: string | null = null;
@@ -97,7 +99,7 @@ serve(async (req) => {
         const stepSize = parseFloat(quantityFilter.stepSize);
         const minQty = parseFloat(quantityFilter.minQty);
 
-        console.log(`[CLOSE-TRADE] Exchange Info para ${pair}: stepSize=${stepSize}, minQty=${minQty}, minNotional=${minNotional}`);
+        console.log(`[${functionName}] Exchange Info para ${pair}: stepSize=${stepSize}, minQty=${minQty}, minNotional=${minNotional}`);
 
         // 3. Obtener el balance actual del activo del usuario en Binance
         const timestamp = Date.now();
@@ -118,19 +120,24 @@ serve(async (req) => {
         const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
         const actualFreeBalance = assetBalance ? parseFloat(assetBalance.free) : 0;
 
-        let quantityToSell = trade.asset_amount; // Cantidad deseada a vender (la que se compró para este trade)
-
-        if (actualFreeBalance === 0) {
-          binanceErrorMessage = `No hay saldo disponible de ${baseAsset} en Binance para vender.`;
-          console.warn(`[CLOSE-TRADE] ${binanceErrorMessage}`);
-        } else if (quantityToSell > actualFreeBalance) {
-          // Si la cantidad registrada en el trade es mayor que el saldo libre, vender el máximo disponible
-          binanceErrorMessage = `Saldo insuficiente de ${baseAsset} en Binance. Se intentará vender el máximo disponible (${actualFreeBalance.toFixed(8)}).`;
-          console.warn(`[CLOSE-TRADE] ${binanceErrorMessage}`);
-          quantityToSell = actualFreeBalance;
+        // Determine the actual quantity to attempt to sell
+        let quantityToSell = 0;
+        if (actualFreeBalance > 0) {
+            // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
+            quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
+            
+            // Add a small safety margin to avoid "insufficient balance" errors due to tiny discrepancies or race conditions
+            // This might leave a small amount of dust, but increases reliability of the sell order.
+            // Only apply if quantityToSell is not already very small.
+            if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
+                quantityToSell *= 0.999; // Reduce by 0.1%
+            }
         }
 
-        if (quantityToSell > 0) { // Solo proceder con la orden de venta si hay algo que vender
+        if (quantityToSell === 0) {
+            binanceErrorMessage = `No hay saldo disponible de ${baseAsset} en Binance para vender o la cantidad es demasiado pequeña para ${pair}.`;
+            console.warn(`[${functionName}] ${binanceErrorMessage}`);
+        } else {
           // 4. Obtener el precio actual para verificar MIN_NOTIONAL en ventas
           const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
           const tickerPriceResponse = await fetch(tickerPriceUrl);
@@ -139,27 +146,27 @@ serve(async (req) => {
             throw new Error(`Error al obtener el precio actual para ${pair}: ${tickerPriceData.msg || 'Error desconocido'}`);
           }
           const currentPrice = parseFloat(tickerPriceData.price);
-          console.log(`[CLOSE-TRADE] Precio actual de ${pair}: ${currentPrice}`);
+          console.log(`[${functionName}] Precio actual de ${pair}: ${currentPrice}`);
 
           // 5. Validar y ajustar quantity
           let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
-          console.log(`[CLOSE-TRADE] Cantidad ajustada (usando stepSize ${stepSize}): ${adjustedQuantity}`);
+          console.log(`[${functionName}] Cantidad a vender: ${quantityToSell}, Cantidad ajustada (usando stepSize ${stepSize}): ${adjustedQuantity}`);
 
           if (adjustedQuantity < minQty) {
             binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${pair}. No se realizará la venta.`;
-            console.error(`[CLOSE-TRADE] ${binanceErrorMessage}`);
+            console.error(`[${functionName}] ${binanceErrorMessage}`);
           } else {
             const notionalValue = adjustedQuantity * currentPrice;
-            console.log(`[CLOSE-TRADE] Valor nocional para la orden de venta: ${notionalValue.toFixed(8)} (Mínimo: ${minNotional})`);
+            console.log(`[${functionName}] Valor nocional para la orden de venta: ${notionalValue.toFixed(8)} (Mínimo: ${minNotional})`);
             if (notionalValue < minNotional) {
               binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${pair}. No se realizará la venta.`;
-              console.error(`[CLOSE-TRADE] ${binanceErrorMessage}`);
+              console.error(`[${functionName}] ${binanceErrorMessage}`);
             } else {
               // 6. Ejecutar la orden de venta en Binance
               const sellQueryString = `symbol=${pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
               const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
               const sellUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
-              console.log(`[CLOSE-TRADE] Enviando orden de venta a Binance: ${sellUrl}`);
+              console.log(`[${functionName}] Enviando orden de venta a Binance: ${sellUrl}`);
 
               const sellResponse = await fetch(sellUrl, {
                 method: 'POST',
@@ -167,24 +174,24 @@ serve(async (req) => {
               });
 
               const sellOrderData = await sellResponse.json();
-              console.log(`[CLOSE-TRADE] Respuesta de Binance para la venta:`, sellOrderData);
+              console.log(`[${functionName}] Respuesta de Binance para la venta:`, sellOrderData);
 
               if (!sellResponse.ok) {
                 binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error de Binance al vender: ${sellOrderData.msg || 'Error desconocido'}`;
-                console.error(`[CLOSE-TRADE] ${binanceErrorMessage}`);
+                console.error(`[${functionName}] ${binanceErrorMessage}`);
               } else {
                 binanceSellOrderId = sellOrderData.orderId.toString();
-                console.log(`[CLOSE-TRADE] Activos de la operación ${tradeId} vendidos en Binance.`);
+                console.log(`[${functionName}] Activos de la operación ${tradeId} vendidos en Binance.`);
               }
             }
           }
         }
       } catch (sellAttemptError: any) {
         binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance: ${sellAttemptError.message}`;
-        console.error(`[CLOSE-TRADE] ${binanceErrorMessage}`);
+        console.error(`[${functionName}] ${binanceErrorMessage}`);
       }
     } else {
-      console.log(`[CLOSE-TRADE] Trade ${tradeId} no tiene 'asset_amount' o es 0. No se intentó orden de venta.`);
+      console.log(`[${functionName}] Trade ${tradeId} no tiene 'asset_amount' o es 0. No se intentó orden de venta.`);
     }
 
     // 7. Actualizar el estado de la operación en la base de datos
@@ -196,7 +203,7 @@ serve(async (req) => {
 
     if (tradeType === 'manual') {
       updatePayload.status = 'completed';
-      console.log(`[CLOSE-TRADE] Manual trade ${tradeId} updated to 'completed'.`);
+      console.log(`[${functionName}] Manual trade ${tradeId} updated to 'completed'.`);
     } else if (tradeType === 'signal') {
       // Para operaciones de señal, reiniciar a awaiting_buy_signal para recurrencia
       updatePayload.status = 'awaiting_buy_signal';
@@ -204,23 +211,25 @@ serve(async (req) => {
       updatePayload.purchase_price = null;
       updatePayload.target_price = null;
       updatePayload.binance_order_id_buy = null;
-      console.log(`[CLOSE-TRADE] Signal trade ${tradeId} updated to 'awaiting_buy_signal' for recurrence.`);
+      updatePayload.error_message = null; // Limpiar errores anteriores al reiniciar
+      // created_at se mantiene para saber cuándo se inició el monitoreo original
+      console.log(`[${functionName}] Signal trade ${tradeId} updated to 'awaiting_buy_signal' for recurrence.`);
     } else {
       // Fallback, aunque tradeType siempre debería ser 'manual' o 'signal'
       updatePayload.status = 'completed';
-      console.warn(`[CLOSE-TRADE] Unknown tradeType '${tradeType}' for trade ${tradeId}. Defaulting to 'completed'.`);
+      console.warn(`[${functionName}] Unknown tradeType '${tradeType}' for trade ${tradeId}. Defaulting to 'completed'.`);
     }
 
     const { error: updateError } = await supabaseAdmin
       .from(tableName)
       .update(updatePayload)
-      .eq('id', tradeId);
+      .eq('id', trade.id);
 
     if (updateError) {
-      console.error(`[CLOSE-TRADE] Error al actualizar la operación en DB: ${updateError.message}`);
+      console.error(`[${functionName}] Error al actualizar la operación en DB: ${updateError.message}`);
       throw new Error(`Error al actualizar la operación en DB: ${updateError.message}`);
     }
-    console.log(`[CLOSE-TRADE] Trade ${tradeId} status updated in DB.`);
+    console.log(`[${functionName}] Trade ${trade.id} status updated in DB.`);
 
     // Devolver una respuesta exitosa (HTTP 200), con una advertencia si la venta en Binance falló
     if (binanceErrorMessage) {
@@ -236,7 +245,7 @@ serve(async (req) => {
     }
 
   } catch (error: any) {
-    console.error('Error en la Edge Function close-trade:', error);
+    console.error(`Error en la Edge Function ${functionName}:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

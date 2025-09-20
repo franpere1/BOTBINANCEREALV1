@@ -185,13 +185,15 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const functionName = 'monitor-trades';
+
   try {
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    console.log('[monitor-trades] Starting monitoring cycle.');
+    console.log(`[${functionName}] Starting monitoring cycle.`);
 
     // 1. Obtener todas las operaciones activas (manuales y de señales)
     const { data: manualTrades, error: manualTradesError } = await supabaseAdmin
@@ -200,7 +202,7 @@ serve(async (req) => {
       .eq('status', 'active');
 
     if (manualTradesError) {
-      console.error('[monitor-trades] Error fetching active manual trades:', manualTradesError);
+      console.error(`[${functionName}] Error fetching active manual trades:`, manualTradesError);
       return new Response(JSON.stringify({ error: 'Error fetching active manual trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -211,21 +213,21 @@ serve(async (req) => {
       .in('status', ['active', 'paused', 'awaiting_buy_signal']); // Incluir el nuevo estado
 
     if (signalTradesError) {
-      console.error('[monitor-trades] Error fetching active/awaiting signal trades:', signalTradesError);
+      console.error(`[${functionName}] Error fetching active/awaiting signal trades:`, signalTradesError);
       return new Response(JSON.stringify({ error: 'Error fetching active/awaiting signal trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const allActiveTrades = [...(manualTrades || []), ...(signalTrades || [])];
 
     if (!allActiveTrades || allActiveTrades.length === 0) {
-      console.log('[monitor-trades] No active or awaiting trades to monitor. Exiting.');
+      console.log(`[${functionName}] No active or awaiting trades to monitor. Exiting.`);
       return new Response(JSON.stringify({ message: 'No active or awaiting trades to monitor.' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`[monitor-trades] Monitoring ${allActiveTrades.length} active/awaiting trades.`);
+    console.log(`[${functionName}] Monitoring ${allActiveTrades.length} active/awaiting trades.`);
 
     for (const trade of allActiveTrades) {
-      console.log(`[monitor-trades] Processing trade ${trade.id} (${trade.pair}), current status: ${trade.status}`);
+      console.log(`[${functionName}] Processing trade ${trade.id} (${trade.pair}), current status: ${trade.status}`);
       try {
         const tableName = manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades';
 
@@ -237,7 +239,7 @@ serve(async (req) => {
           .single();
 
         if (keysError || !keys) {
-          console.error(`[monitor-trades] API keys not found for user ${trade.user_id} for trade ${trade.id}. Skipping.`);
+          console.error(`[${functionName}] API keys not found for user ${trade.user_id} for trade ${trade.id}. Skipping.`);
           await supabaseAdmin
             .from(tableName)
             .update({ status: 'error', error_message: 'API keys not found or invalid.' })
@@ -249,12 +251,12 @@ serve(async (req) => {
 
         if (trade.status === 'awaiting_buy_signal') {
           // Lógica para operaciones esperando señal de compra
-          console.log(`[monitor-trades] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal.`);
+          console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal.`);
           // Usar la función actualizada que obtiene datos de la API de Binance
           const mlSignal = await getMlSignalForAssetFromBinance(trade.pair);
 
           if (mlSignal.signal === 'BUY' && mlSignal.confidence >= 70) {
-            console.log(`[monitor-trades] BUY signal detected for ${trade.pair} with ${mlSignal.confidence.toFixed(1)}% confidence. Initiating buy order.`);
+            console.log(`[${functionName}] BUY signal detected for ${trade.pair} with ${mlSignal.confidence.toFixed(1)}% confidence. Initiating buy order.`);
 
             // Obtener información de intercambio para precisión y límites
             const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${trade.pair}`;
@@ -274,7 +276,7 @@ serve(async (req) => {
             let queryString = `symbol=${trade.pair}&side=BUY&type=MARKET&quoteOrderQty=${trade.usdt_amount}&timestamp=${Date.now()}`;
             const signature = new HmacSha256(api_secret).update(queryString).toString();
             const url = `https://api.binance.com/api/v3/order?${queryString}&signature=${signature}`;
-            console.log(`[monitor-trades] Sending BUY order for ${trade.pair} with ${trade.usdt_amount} USDT.`);
+            console.log(`[${functionName}] Sending BUY order for ${trade.pair} with ${trade.usdt_amount} USDT.`);
 
             const response = await fetch(url, {
               method: 'POST',
@@ -283,10 +285,10 @@ serve(async (req) => {
 
             const orderResult = await response.json();
             if (!response.ok) {
-              console.error(`[monitor-trades] Binance BUY order error for ${trade.pair}: ${orderResult.msg || 'Unknown error'}`, orderResult);
+              console.error(`[${functionName}] Binance BUY order error for ${trade.pair}: ${orderResult.msg || 'Unknown error'}`, orderResult);
               throw new Error(`Error de Binance al comprar: ${orderResult.msg || 'Error desconocido'}`);
             }
-            console.log(`[monitor-trades] Binance BUY order successful for ${trade.pair}. Order ID: ${orderResult.orderId}`);
+            console.log(`[${functionName}] Binance BUY order successful for ${trade.pair}. Order ID: ${orderResult.orderId}`);
 
             // Calcular precio de compra y precio objetivo
             const executedQty = parseFloat(orderResult.executedQty);
@@ -308,13 +310,13 @@ serve(async (req) => {
               .eq('id', trade.id);
 
             if (updateToActiveError) {
-              console.error(`[monitor-trades] Error updating trade ${trade.id} to 'active' status:`, updateToActiveError);
+              console.error(`[${functionName}] Error updating trade ${trade.id} to 'active' status:`, updateToActiveError);
               throw new Error(`Error al actualizar la operación a activa en DB: ${updateToActiveError.message}`);
             }
-            console.log(`[monitor-trades] Trade ${trade.id} activated and buy order placed successfully.`);
+            console.log(`[${functionName}] Trade ${trade.id} activated and buy order placed successfully.`);
 
           } else {
-            console.log(`[monitor-trades] No BUY signal (>=70% confidence) for ${trade.pair}. Current signal: ${mlSignal.signal}, Confidence: ${mlSignal.confidence.toFixed(1)}%. Continuing to await.`);
+            console.log(`[${functionName}] No BUY signal (>=70% confidence) for ${trade.pair}. Current signal: ${mlSignal.signal}, Confidence: ${mlSignal.confidence.toFixed(1)}%. Continuing to await.`);
           }
 
         } else if (trade.status === 'active') {
@@ -324,15 +326,15 @@ serve(async (req) => {
           const tickerData = await tickerResponse.json();
 
           if (!tickerResponse.ok) {
-            console.error(`[monitor-trades] Error fetching ticker price for ${trade.pair}: ${tickerData.msg || 'Unknown error'}`, tickerData);
+            console.error(`[${functionName}] Error fetching ticker price for ${trade.pair}: ${tickerData.msg || 'Unknown error'}`, tickerData);
             throw new Error(tickerData.msg || `Error fetching ticker price for ${trade.pair}`);
           }
           const currentPrice = parseFloat(tickerData.price);
 
-          console.log(`[monitor-trades] Trade ${trade.id} (${trade.pair}): Current Price = ${currentPrice}, Target Price = ${trade.target_price}`);
+          console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}): Current Price = ${currentPrice}, Target Price = ${trade.target_price}`);
 
           if (currentPrice >= trade.target_price) {
-            console.log(`[monitor-trades] Target price reached for trade ${trade.id}. Executing sell order.`);
+            console.log(`[${functionName}] Target price reached for trade ${trade.id}. Executing sell order.`);
 
             // Obtener información de intercambio para precisión y límites
             const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${trade.pair}`;
@@ -370,39 +372,44 @@ serve(async (req) => {
             const accountData = await accountResponse.json();
 
             if (!accountResponse.ok) {
-              console.error(`[monitor-trades] Error fetching Binance account balance for user ${trade.user_id}: ${accountData.msg || 'Unknown error'}`, accountData);
+              console.error(`[${functionName}] Error fetching Binance account balance for user ${trade.user_id}: ${accountData.msg || 'Unknown error'}`, accountData);
               throw new Error(`Error al obtener el balance de la cuenta de Binance: ${accountData.msg || 'Error desconocido'}`);
             }
 
             const baseAsset = trade.pair.replace('USDT', '');
             const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
             
-            let quantityToSell = trade.asset_amount; // Cantidad deseada a vender (la que se compró para este trade)
+            // Determine the actual quantity to attempt to sell
+            let quantityToSell = 0;
             const actualFreeBalance = assetBalance ? parseFloat(assetBalance.free) : 0;
 
-            if (!assetBalance || actualFreeBalance === 0) {
-              console.warn(`[MONITOR-TRADES] No hay saldo disponible de ${baseAsset} para vender para el trade ${trade.id}. Marking as error.`);
+            if (actualFreeBalance > 0) {
+                // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
+                quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
+                
+                // Add a small safety margin to avoid "insufficient balance" errors due to tiny discrepancies or race conditions
+                // This might leave a small amount of dust, but increases reliability of the sell order.
+                // Only apply if quantityToSell is not already very small.
+                if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
+                    quantityToSell *= 0.999; // Reduce by 0.1%
+                }
+            }
+
+            if (quantityToSell === 0) {
+              console.warn(`[${functionName}] No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña para ${trade.pair}. Marking as error.`);
               // Marcar como error si no hay activos para vender cuando debería haberlos
               await supabaseAdmin
                 .from(tableName)
-                .update({ status: 'error', error_message: `No hay saldo disponible de ${baseAsset} para vender.` })
+                .update({ status: 'error', error_message: `No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña.` })
                 .eq('id', trade.id);
               continue;
-            } else if (quantityToSell && quantityToSell > actualFreeBalance) {
-              // Si la cantidad registrada en el trade es mayor que el saldo libre, vender el máximo disponible
-              console.warn(`[MONITOR-TRADES] Saldo insuficiente de ${baseAsset} en Binance para el trade ${trade.id}. Se intentará vender el máximo disponible (${actualFreeBalance.toFixed(8)}).`);
-              quantityToSell = actualFreeBalance;
-            } else if (!quantityToSell) {
-              // Si asset_amount es null (no debería pasar en estado 'active', pero como fallback)
-              console.warn(`[MONITOR-TRADES] asset_amount es null para el trade ${trade.id}. Se intentará vender el saldo disponible (${actualFreeBalance.toFixed(8)}).`);
-              quantityToSell = actualFreeBalance;
             }
 
-            let adjustedQuantity = adjustQuantity(quantityToSell || 0, stepSize); // Usar 0 como fallback si quantityToSell es undefined/null
-            console.log(`[MONITOR-TRADES] Calculated quantity to sell for ${trade.pair}: ${quantityToSell}, Adjusted: ${adjustedQuantity}`);
+            let adjustedQuantity = adjustQuantity(quantityToSell, stepSize); // Usar 0 como fallback si quantityToSell es undefined/null
+            console.log(`[${functionName}] Calculated quantity to sell for ${trade.pair}: ${quantityToSell}, Adjusted: ${adjustedQuantity}`);
 
             if (adjustedQuantity < minQty) {
-              console.warn(`[MONITOR-TRADES] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta. Marking as error.`);
+              console.warn(`[${functionName}] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta. Marking as error.`);
               await supabaseAdmin
                 .from(tableName)
                 .update({ status: 'error', error_message: `Cantidad de venta (${adjustedQuantity}) menor que la mínima (${minQty}).` })
@@ -412,7 +419,7 @@ serve(async (req) => {
 
             const notionalValue = adjustedQuantity * currentPrice;
             if (notionalValue < minNotional) {
-              console.warn(`[MONITOR-TRADES] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta. Marking as error.`);
+              console.warn(`[${functionName}] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta. Marking as error.`);
               await supabaseAdmin
                 .from(tableName)
                 .update({ status: 'error', error_message: `Valor nocional de venta (${notionalValue.toFixed(8)}) menor que el mínimo (${minNotional}).` })
@@ -423,7 +430,7 @@ serve(async (req) => {
             const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
             const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
             const orderUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
-            console.log(`[MONITOR-TRADES] Sending SELL order for ${trade.pair} with quantity ${adjustedQuantity}.`);
+            console.log(`[${functionName}] Sending SELL order for ${trade.pair} with quantity ${adjustedQuantity}.`);
 
             const orderResponse = await fetch(orderUrl, {
               method: 'POST',
@@ -433,10 +440,10 @@ serve(async (req) => {
             const orderData = await orderResponse.json();
 
             if (!orderResponse.ok) {
-              console.error(`[MONITOR-TRADES] Binance SELL order error for ${trade.pair}: ${orderData.msg || 'Unknown error'}`, orderData);
+              console.error(`[${functionName}] Binance SELL order error for ${trade.pair}: ${orderData.msg || 'Unknown error'}`, orderData);
               throw new Error(`Binance sell order error: ${orderData.msg || 'Unknown error'}`);
             }
-            console.log(`[MONITOR-TRADES] Binance SELL order successful for ${trade.pair}. Order ID: ${orderData.orderId}`);
+            console.log(`[${functionName}] Binance SELL order successful for ${trade.pair}. Order ID: ${orderData.orderId}`);
 
 
             // Si la operación es manual, se marca como completada y no se reinicia.
@@ -451,10 +458,10 @@ serve(async (req) => {
                 })
                 .eq('id', trade.id);
               if (updateManualError) {
-                console.error(`[monitor-trades] Error updating manual trade ${trade.id} to 'completed' status:`, updateManualError);
+                console.error(`[${functionName}] Error updating manual trade ${trade.id} to 'completed' status:`, updateManualError);
                 throw new Error(`Error al actualizar la operación manual a completada en DB: ${updateManualError.message}`);
               }
-              console.log(`[monitor-trades] Manual trade ${trade.id} completed successfully.`);
+              console.log(`[${functionName}] Manual trade ${trade.id} completed successfully.`);
             } else { // tableName === 'signal_trades'
               const { error: updateSignalError } = await supabaseAdmin
                 .from(tableName)
@@ -471,31 +478,31 @@ serve(async (req) => {
                 })
                 .eq('id', trade.id);
               if (updateSignalError) {
-                console.error(`[monitor-trades] Error updating signal trade ${trade.id} to 'awaiting_buy_signal' status:`, updateSignalError);
+                console.error(`[${functionName}] Error updating signal trade ${trade.id} to 'awaiting_buy_signal' status:`, updateSignalError);
                 throw new Error(`Error al actualizar la operación de señal a esperando compra en DB: ${updateSignalError.message}`);
               }
-              console.log(`[monitor-trades] Signal trade ${trade.id} completed and reset to 'awaiting_buy_signal' for recurrence.`);
+              console.log(`[${functionName}] Signal trade ${trade.id} completed and reset to 'awaiting_buy_signal' for recurrence.`);
             }
           }
         }
       } catch (tradeError: any) {
-        console.error(`[monitor-trades] Error processing trade ${trade.id}:`, tradeError);
+        console.error(`[${functionName}] Error processing trade ${trade.id}:`, tradeError);
         const tableName = manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades';
         await supabaseAdmin
           .from(tableName)
           .update({ status: 'error', error_message: tradeError.message })
           .eq('id', trade.id);
-        console.log(`[monitor-trades] Trade ${trade.id} status updated to 'error'.`);
+        console.log(`[${functionName}] Trade ${trade.id} status updated to 'error'.`);
       }
     }
 
-    console.log('[monitor-trades] Monitoring cycle completed.');
+    console.log(`[${functionName}] Monitoring cycle completed.`);
     return new Response(JSON.stringify({ message: 'Trade monitoring completed.' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (error) {
-    console.error('[monitor-trades] Unhandled error in monitor-trades Edge Function:', error);
+    console.error(`[${functionName}] Unhandled error in ${functionName} Edge Function:`, error);
     return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
