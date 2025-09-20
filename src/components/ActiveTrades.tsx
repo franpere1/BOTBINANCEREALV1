@@ -51,7 +51,6 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const handleCloseTrade = async () => {
     setIsClosing(true);
     try {
-      // Llamar a la nueva función Edge close-trade
       const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
         body: {
           tradeId: trade.id,
@@ -62,14 +61,18 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       if (functionError) {
         throw functionError;
       }
-      if (data.error) { // Verificar si la función Edge devolvió un error en el cuerpo
-        throw new Error(data.error);
+      
+      // Verificar si la función Edge devolvió un error en el cuerpo (binanceError)
+      if (data.binanceError) {
+        showError(`Operación de ${trade.pair} marcada como completada, pero hubo un error al vender activos en Binance: ${data.binanceError}`);
+      } else {
+        showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
       }
-
-      showSuccess(`¡Operación de ${trade.pair} cerrada manualmente!`);
+      
       queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
-      queryClient.invalidateQueries({ queryKey: ['activeTradesForSummary'] }); // Invalidar también el resumen
-      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] }); // Invalidar el resumen de Binance
+      queryClient.invalidateQueries({ queryKey: ['activeTradesForSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['completedTrades'] }); // Invalidar historial para que aparezca
     } catch (error: any) {
       showError(`Error al cerrar la operación de ${trade.pair}: ${error.message}`);
     } finally {

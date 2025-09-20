@@ -106,20 +106,31 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
           body: { tradeId: trade.id },
         });
         if (functionError) throw functionError;
-        if (data.error) throw new Error(data.error);
-        showSuccess(`Monitoreo de ${trade.pair} eliminado con éxito.`);
+        
+        // Verificar si la función Edge devolvió un error en el cuerpo (binanceError)
+        if (data.binanceError) {
+          showError(`Monitoreo de ${trade.pair} eliminado, pero hubo un error al intentar vender activos en Binance: ${data.binanceError}`);
+        } else {
+          showSuccess(`Monitoreo de ${trade.pair} eliminado con éxito.`);
+        }
       } else {
         // Cerrar trade (activo o pausado)
         const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
           body: { tradeId: trade.id, tradeType: 'signal' },
         });
         if (functionError) throw functionError;
-        if (data.error) throw new Error(data.error);
-        showSuccess(`Operación de ${trade.pair} cerrada con éxito.`);
+        
+        // Verificar si la función Edge devolvió un error en el cuerpo (binanceError)
+        if (data.binanceError) {
+          showError(`Operación de ${trade.pair} marcada como completada, pero hubo un error al vender activos en Binance: ${data.binanceError}`);
+        } else {
+          showSuccess(`Operación de ${trade.pair} cerrada con éxito.`);
+        }
       }
       queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
       queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
       queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['completedTrades'] }); // Invalidar historial para que aparezca
     } catch (error: any) {
       showError(`Error al procesar la acción para ${trade.pair}: ${error.message}`);
     } finally {
