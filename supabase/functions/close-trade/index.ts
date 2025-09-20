@@ -71,11 +71,12 @@ serve(async (req) => {
 
     const { pair } = trade;
     const baseAsset = pair.replace('USDT', '');
-    console.log(`[${functionName}] Trade ${tradeId} for pair ${pair}. Base Asset: ${baseAsset}`);
+    console.log(`[${functionName}] Trade ${trade.id} for pair ${pair}. Base Asset: ${baseAsset}`);
 
     let binanceSellOrderId: string | null = null;
     let binanceErrorMessage: string | null = null;
     let shouldAttemptBinanceSell = true; // Bandera para controlar la llamada a la API de Binance
+    let adjustedQuantity = 0; // Declarar aquí para que esté disponible en el scope
 
     // Solo intentar vender si la operación tiene una cantidad de activo registrada y es positiva
     if (trade.asset_amount && trade.asset_amount > 0) {
@@ -132,12 +133,10 @@ serve(async (req) => {
             // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
             quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
             
-            // Add a small safety margin to avoid "insufficient balance" errors due to tiny discrepancies or race conditions
-            // This might leave a small amount of dust, but increases reliability of the sell order.
-            // Only apply if quantityToSell is not already very small.
-            if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
-                quantityToSell *= 0.999; // Reduce by 0.1%
-            }
+            // ELIMINADO: La reducción del 0.1% que podía causar que la cantidad se redondeara a cero.
+            // if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
+            //     quantityToSell *= 0.999; // Reduce by 0.1%
+            // }
         }
 
         if (quantityToSell === 0) {
@@ -156,7 +155,7 @@ serve(async (req) => {
           console.log(`[${functionName}] Precio actual de ${pair}: ${currentPrice}`);
 
           // 5. Validar y ajustar quantity
-          let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
+          adjustedQuantity = adjustQuantity(quantityToSell, stepSize); // Asignar a la variable declarada
           console.log(`[${functionName}] Cantidad a vender: ${quantityToSell}, Cantidad ajustada (usando stepSize ${stepSize}): ${adjustedQuantity}`);
 
           if (adjustedQuantity < minQty) {
@@ -179,7 +178,7 @@ serve(async (req) => {
         shouldAttemptBinanceSell = false; // Si hay un error en la preparación, no intentar la venta
       }
     } else {
-      console.log(`[${functionName}] Trade ${tradeId} no tiene 'asset_amount' o es 0. No se intentó orden de venta.`);
+      console.log(`[${functionName}] Trade ${trade.id} no tiene 'asset_amount' o es 0. No se intentó orden de venta.`);
       shouldAttemptBinanceSell = false; // No hay activos para vender
     }
 
@@ -204,14 +203,14 @@ serve(async (req) => {
                 console.error(`[${functionName}] ${binanceErrorMessage}`);
             } else {
                 binanceSellOrderId = sellOrderData.orderId.toString();
-                console.log(`[${functionName}] Activos de la operación ${tradeId} vendidos en Binance.`);
+                console.log(`[${functionName}] Activos de la operación ${trade.id} vendidos en Binance.`);
             }
         } catch (sellAttemptError: any) {
             binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance: ${sellAttemptError.message}`;
             console.error(`[${functionName}] ${binanceErrorMessage}`);
         }
     } else {
-        console.log(`[${functionName}] Skipping Binance sell order for trade ${tradeId} due to validation failure or no assets to sell.`);
+        console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
     }
 
     // 7. Actualizar el estado de la operación en la base de datos
@@ -223,7 +222,7 @@ serve(async (req) => {
 
     if (tradeType === 'manual') {
       updatePayload.status = 'completed';
-      console.log(`[${functionName}] Manual trade ${tradeId} updated to 'completed'.`);
+      console.log(`[${functionName}] Manual trade ${trade.id} updated to 'completed'.`);
     } else if (tradeType === 'signal') {
       // Para operaciones de señal, reiniciar a awaiting_buy_signal para recurrencia
       updatePayload.status = 'awaiting_buy_signal';
@@ -233,7 +232,7 @@ serve(async (req) => {
       updatePayload.binance_order_id_buy = null;
       updatePayload.error_message = null; // Limpiar errores anteriores al reiniciar
       // created_at se mantiene para saber cuándo se inició el monitoreo original
-      console.log(`[${functionName}] Signal trade ${tradeId} updated to 'awaiting_buy_signal' for recurrence.`);
+      console.log(`[${functionName}] Signal trade ${trade.id} updated to 'awaiting_buy_signal' for recurrence.`);
     } else {
       // Fallback, aunque tradeType siempre debería ser 'manual' o 'signal'
       updatePayload.status = 'completed';

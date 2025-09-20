@@ -69,6 +69,7 @@ serve(async (req) => {
     let binanceSellAttempted = false;
     let binanceErrorMessage: string | null = null;
     let shouldAttemptBinanceSell = true; // Bandera para controlar la llamada a la API de Binance
+    let adjustedQuantity = 0; // Declarar aquí para que esté disponible en el scope
 
     // 2. Si la operación está activa y tiene una cantidad de activo, intentar vender los activos
     if (trade.status === 'active' && trade.asset_amount && trade.asset_amount > 0) {
@@ -126,12 +127,10 @@ serve(async (req) => {
             // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
             quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
             
-            // Add a small safety margin to avoid "insufficient balance" errors due to tiny discrepancies or race conditions
-            // This might leave a small amount of dust, but increases reliability of the sell order.
-            // Only apply if quantityToSell is not already very small.
-            if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
-                quantityToSell *= 0.999; // Reduce by 0.1%
-            }
+            // ELIMINADO: La reducción del 0.1% que podía causar que la cantidad se redondeara a cero.
+            // if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
+            //     quantityToSell *= 0.999; // Reduce by 0.1%
+            // }
         }
 
         if (quantityToSell === 0) {
@@ -148,7 +147,7 @@ serve(async (req) => {
           }
           const currentPrice = parseFloat(tickerPriceData.price);
 
-          let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
+          adjustedQuantity = adjustQuantity(quantityToSell, stepSize); // Asignar a la variable declarada
 
           if (adjustedQuantity < minQty) {
             console.warn(`[${functionName}] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`);
@@ -206,7 +205,7 @@ serve(async (req) => {
       .from('signal_trades')
       .delete()
       .eq('id', tradeId)
-      .eq('user_id', user.id); // Asegurar que el usuario es dueño de la operación
+      .eq('user.id', user.id); // Asegurar que el usuario es dueño de la operación
 
     if (deleteError) {
       throw new Error(`Error al eliminar la operación de DB: ${deleteError.message}`);

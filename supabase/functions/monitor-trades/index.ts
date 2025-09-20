@@ -392,32 +392,31 @@ serve(async (req) => {
                 // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
                 quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
                 
-                // Add a small safety margin to avoid "insufficient balance" errors due to tiny discrepancies or race conditions
-                // This might leave a small amount of dust, but increases reliability of the sell order.
-                // Only apply if quantityToSell is not already very small.
-                if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
-                    quantityToSell *= 0.999; // Reduce by 0.1%
-                }
+                // ELIMINADO: La reducción del 0.1% que podía causar que la cantidad se redondeara a cero.
+                // if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
+                //     quantityToSell *= 0.999; // Reduce by 0.1%
+                // }
             }
 
             let binanceSellAttemptedInMonitor = false;
             let binanceErrorMessageInMonitor: string | null = null;
             let shouldAttemptBinanceSellInMonitor = true;
+            let adjustedQuantityInMonitor = 0; // Declarar aquí para que esté disponible en el scope
 
             if (quantityToSell === 0) {
               binanceErrorMessageInMonitor = `No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña para ${trade.pair}.`;
               console.warn(`[${functionName}] ${binanceErrorMessageInMonitor}`);
               shouldAttemptBinanceSellInMonitor = false;
             } else {
-              let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
-              console.log(`[${functionName}] Calculated quantity to sell for ${trade.pair}: ${quantityToSell}, Adjusted: ${adjustedQuantity}`);
+              adjustedQuantityInMonitor = adjustQuantity(quantityToSell, stepSize); // Asignar a la variable declarada
+              console.log(`[${functionName}] Calculated quantity to sell for ${trade.pair}: ${quantityToSell}, Adjusted: ${adjustedQuantityInMonitor}`);
 
-              if (adjustedQuantity < minQty) {
-                binanceErrorMessageInMonitor = `La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`;
+              if (adjustedQuantityInMonitor < minQty) {
+                binanceErrorMessageInMonitor = `La cantidad ajustada (${adjustedQuantityInMonitor}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`;
                 console.warn(`[${functionName}] ${binanceErrorMessageInMonitor}`);
                 shouldAttemptBinanceSellInMonitor = false;
               } else {
-                const notionalValue = adjustedQuantity * currentPrice;
+                const notionalValue = adjustedQuantityInMonitor * currentPrice;
                 if (notionalValue < minNotional) {
                   binanceErrorMessageInMonitor = `El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta.`;
                   console.warn(`[${functionName}] ${binanceErrorMessageInMonitor}`);
@@ -428,10 +427,10 @@ serve(async (req) => {
 
             if (shouldAttemptBinanceSellInMonitor) {
               binanceSellAttemptedInMonitor = true;
-              const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
+              const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantityInMonitor}&timestamp=${Date.now()}`;
               const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
               const orderUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
-              console.log(`[${functionName}] Sending SELL order for ${trade.pair} with quantity ${adjustedQuantity}.`);
+              console.log(`[${functionName}] Sending SELL order for ${trade.pair} with quantity ${adjustedQuantityInMonitor}.`);
 
               const orderResponse = await fetch(orderUrl, {
                 method: 'POST',
