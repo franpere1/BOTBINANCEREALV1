@@ -12,9 +12,9 @@ interface Trade {
   id: string;
   pair: string;
   usdt_amount: number;
-  asset_amount: number;
-  purchase_price: number;
-  target_price: number;
+  asset_amount: number | null; // Puede ser null
+  purchase_price: number | null; // Puede ser null
+  target_price: number | null; // Puede ser null
   take_profit_percentage: number;
   created_at: string;
   completed_at: string | null;
@@ -23,19 +23,37 @@ interface Trade {
 }
 
 const fetchCompletedTrades = async (userId: string) => {
-  const { data, error } = await supabase
+  // Fetch from manual_trades
+  const { data: manualTrades, error: manualError } = await supabase
     .from('manual_trades')
     .select('*')
     .eq('user_id', userId)
-    .in('status', ['completed', 'error']) // Incluir también operaciones con error
-    .order('completed_at', { ascending: false, nullsFirst: false }); // Ordenar por fecha de cierre
-  if (error) throw new Error(error.message);
-  return data;
+    .in('status', ['completed', 'error']);
+  if (manualError) throw new Error(manualError.message);
+
+  // Fetch from signal_trades
+  const { data: signalTrades, error: signalError } = await supabase
+    .from('signal_trades')
+    .select('*')
+    .eq('user_id', userId)
+    .in('status', ['completed', 'error']);
+  if (signalError) throw new Error(signalError.message);
+
+  // Combine and sort all trades by completed_at in descending order
+  const allTrades = [...(manualTrades || []), ...(signalTrades || [])];
+  
+  allTrades.sort((a, b) => {
+    const dateA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+    const dateB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+    return dateB - dateA; // Descending order
+  });
+
+  return allTrades;
 };
 
 const TradeHistory = () => {
   const { user } = useAuth();
-  const { data: trades, isLoading, isError } = useQuery({
+  const { data: trades, isLoading, isError } = useQuery<Trade[], Error>({
     queryKey: ['completedTrades'],
     queryFn: () => fetchCompletedTrades(user!.id),
     enabled: !!user,
@@ -85,7 +103,7 @@ const TradeHistory = () => {
       <CardHeader>
         <CardTitle className="text-yellow-400 text-2xl">Historial de Operaciones</CardTitle>
         <CardDescription className="text-gray-400">
-          Revisa tus operaciones de trading manual completadas y con errores.
+          Revisa tus operaciones de trading manual y por señales completadas y con errores.
         </CardDescription>
       </CardHeader>
       <CardContent>
