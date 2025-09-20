@@ -9,8 +9,14 @@ const corsHeaders = {
 
 // Helper para ajustar la cantidad a la precisión del stepSize de Binance
 const adjustQuantity = (qty: number, step: number) => {
-  const numSteps = Math.floor(qty / step);
-  return numSteps * step;
+  // Calculate the number of decimal places from stepSize
+  const precision = Math.max(0, -Math.floor(Math.log10(step)));
+  
+  // Divide by step, floor, then multiply by step to get a quantity that is a multiple of stepSize
+  const adjusted = Math.floor(qty / step) * step;
+  
+  // Format to the correct precision to avoid floating point inaccuracies
+  return parseFloat(adjusted.toFixed(precision));
 };
 
 serve(async (req) => {

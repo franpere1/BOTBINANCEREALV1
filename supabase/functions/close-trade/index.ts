@@ -9,9 +9,14 @@ const corsHeaders = {
 
 // Helper para ajustar la cantidad a la precisión del stepSize de Binance
 const adjustQuantity = (qty: number, step: number) => {
-  // Calcula el número de pasos y luego multiplica por el stepSize para asegurar la precisión
-  const numSteps = Math.floor(qty / step);
-  return numSteps * step;
+  // Calculate the number of decimal places from stepSize
+  const precision = Math.max(0, -Math.floor(Math.log10(step)));
+  
+  // Divide by step, floor, then multiply by step to get a quantity that is a multiple of stepSize
+  const adjusted = Math.floor(qty / step) * step;
+  
+  // Format to the correct precision to avoid floating point inaccuracies
+  return parseFloat(adjusted.toFixed(precision));
 };
 
 serve(async (req) => {
@@ -55,7 +60,7 @@ serve(async (req) => {
     // 1. Obtener los detalles de la operación
     const { data: trade, error: fetchTradeError } = await supabaseAdmin
       .from(tableName)
-      .select('id, pair, asset_amount, user_id') // Se añadió 'id' aquí
+      .select('id, pair, asset_amount, user_id')
       .eq('id', tradeId)
       .eq('user_id', user.id) // Asegurar que el usuario es dueño de la operación
       .single();
