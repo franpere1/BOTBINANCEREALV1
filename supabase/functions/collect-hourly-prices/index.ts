@@ -35,6 +35,7 @@ serve(async (req) => {
         }
         const currentPrice = parseFloat(tickerData.price);
 
+        // Insertar el nuevo precio
         const { error: insertError } = await supabaseAdmin
           .from('hourly_prices')
           .insert({
@@ -47,6 +48,43 @@ serve(async (req) => {
           throw new Error(`Error inserting hourly price for ${asset}: ${insertError.message}`);
         }
         console.log(`[${functionName}] Successfully collected and stored price for ${asset}: ${currentPrice}`);
+
+        // Lógica de retención de datos: mantener solo las últimas 100 horas
+        const { count, error: countError } = await supabaseAdmin
+          .from('hourly_prices')
+          .select('id', { count: 'exact' })
+          .eq('asset', asset);
+
+        if (countError) {
+          console.error(`[${functionName}] Error counting hourly prices for ${asset}:`, countError);
+          // No lanzamos error fatal, solo registramos y continuamos
+        } else if (count !== null && count >= 150) {
+          console.log(`[${functionName}] ${asset}: ${count} records found. Deleting oldest 50.`);
+          
+          // Obtener los IDs de los 50 registros más antiguos
+          const { data: oldestRecords, error: fetchOldestError } = await supabaseAdmin
+            .from('hourly_prices')
+            .select('id')
+            .eq('asset', asset)
+            .order('timestamp', { ascending: true })
+            .limit(50);
+
+          if (fetchOldestError) {
+            console.error(`[${functionName}] Error fetching oldest records for ${asset}:`, fetchOldestError);
+          } else if (oldestRecords && oldestRecords.length > 0) {
+            const idsToDelete = oldestRecords.map(record => record.id);
+            const { error: deleteError } = await supabaseAdmin
+              .from('hourly_prices')
+              .delete()
+              .in('id', idsToDelete);
+
+            if (deleteError) {
+              console.error(`[${functionName}] Error deleting oldest records for ${asset}:`, deleteError);
+            } else {
+              console.log(`[${functionName}] Successfully deleted ${idsToDelete.length} oldest records for ${asset}.`);
+            }
+          }
+        }
 
       } catch (assetError: any) {
         console.error(`[${functionName}] Failed to collect price for ${asset}:`, assetError.message);
