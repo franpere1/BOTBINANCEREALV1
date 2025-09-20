@@ -164,8 +164,9 @@ async function getMlSignalForAsset(asset: string) {
 
 // Helper para ajustar la cantidad a la precisión del stepSize de Binance
 const adjustQuantity = (qty: number, step: number) => {
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  return parseFloat(qty.toFixed(precision));
+  // Calcula el número de pasos y luego multiplica por el stepSize para asegurar la precisión
+  const numSteps = Math.floor(qty / step);
+  return numSteps * step;
 };
 
 // Tasa de comisión de Binance (0.1%)
@@ -198,7 +199,7 @@ serve(async (req) => {
     const { data: signalTrades, error: signalTradesError } = await supabaseAdmin
       .from('signal_trades')
       .select('id, user_id, pair, usdt_amount, asset_amount, purchase_price, take_profit_percentage, target_price, status')
-      .in('status', ['active', 'awaiting_buy_signal']); // Incluir el nuevo estado
+      .in('status', ['active', 'paused', 'awaiting_buy_signal']); // Incluir el nuevo estado
 
     if (signalTradesError) {
       console.error('Error fetching active/awaiting signal trades:', signalTradesError);
@@ -361,7 +362,10 @@ serve(async (req) => {
             const baseAsset = trade.pair.replace('USDT', '');
             const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
             
-            if (!assetBalance || parseFloat(assetBalance.free) === 0) {
+            let quantityToSell = trade.asset_amount; // Cantidad deseada a vender (la que se compró para este trade)
+            const actualFreeBalance = assetBalance ? parseFloat(assetBalance.free) : 0;
+
+            if (!assetBalance || actualFreeBalance === 0) {
               console.warn(`[MONITOR-TRADES] No hay saldo disponible de ${baseAsset} para vender para el trade ${trade.id}.`);
               // Marcar como error si no hay activos para vender cuando debería haberlos
               await supabaseAdmin
@@ -369,9 +373,17 @@ serve(async (req) => {
                 .update({ status: 'error', error_message: `No hay saldo disponible de ${baseAsset} para vender.` })
                 .eq('id', trade.id);
               continue;
+            } else if (quantityToSell && quantityToSell > actualFreeBalance) {
+              // Si la cantidad registrada en el trade es mayor que el saldo libre, vender el máximo disponible
+              console.warn(`[MONITOR-TRADES] Saldo insuficiente de ${baseAsset} en Binance para el trade ${trade.id}. Se intentará vender el máximo disponible (${actualFreeBalance.toFixed(8)}).`);
+              quantityToSell = actualFreeBalance;
+            } else if (!quantityToSell) {
+              // Si asset_amount es null (no debería pasar en estado 'active', pero como fallback)
+              console.warn(`[MONITOR-TRADES] asset_amount es null para el trade ${trade.id}. Se intentará vender el saldo disponible (${actualFreeBalance.toFixed(8)}).`);
+              quantityToSell = actualFreeBalance;
             }
-            let finalQuantity = parseFloat(assetBalance.free);
-            let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
+
+            let adjustedQuantity = adjustQuantity(quantityToSell || 0, stepSize); // Usar 0 como fallback si quantityToSell es undefined/null
 
             if (adjustedQuantity < minQty) {
               console.warn(`[MONITOR-TRADES] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`);
