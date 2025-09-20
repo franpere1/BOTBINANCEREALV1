@@ -69,7 +69,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
-    enabled: !isAawaitingDipSignal, // Solo cargar precio si no está esperando señal
+    enabled: !isAwaitingDipSignal, // Solo cargar precio si no está esperando señal
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
 
