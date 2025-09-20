@@ -83,7 +83,7 @@ serve(async (req) => {
   }
 
   try {
-    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'USDCUSDT'];
+    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
     const signalsData = [];
 
     for (const asset of assets) {
