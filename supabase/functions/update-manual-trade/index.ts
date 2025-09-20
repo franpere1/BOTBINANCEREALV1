@@ -51,13 +51,13 @@ serve(async (req) => {
       target_price?: number | null;
       dip_percentage?: number;
       lookback_minutes?: number;
-      error_message?: string | null; // Para limpiar el mensaje de error si se edita
+      error_message?: string | null;
     } = {};
 
     // Obtener el trade actual para verificar el estado y purchase_price
     const { data: existingTrade, error: fetchTradeError } = await supabaseAdmin
       .from('manual_trades')
-      .select('purchase_price, status, strategy_type')
+      .select('purchase_price, status, strategy_type, pair') // También necesitamos el 'pair'
       .eq('id', tradeId)
       .eq('user_id', user.id)
       .single();
@@ -74,8 +74,52 @@ serve(async (req) => {
       if (takeProfitPercentage !== undefined) updatePayload.take_profit_percentage = takeProfitPercentage;
       if (dipPercentage !== undefined) updatePayload.dip_percentage = dipPercentage;
       if (lookbackMinutes !== undefined) updatePayload.lookback_minutes = lookbackMinutes;
-      // NO limpiar el error_message aquí. Se actualizará en el siguiente ciclo de monitor-trades.
       updatePayload.target_price = null; // Asegurarse de que target_price sea null si está esperando dip
+
+      // Re-evaluar la condición del dip con los nuevos parámetros
+      const currentDipPercentage = dipPercentage !== undefined ? dipPercentage : existingTrade.dip_percentage;
+      const currentLookbackMinutes = lookbackMinutes !== undefined ? lookbackMinutes : existingTrade.lookback_minutes;
+      const currentPair = existingTrade.pair;
+
+      if (currentDipPercentage !== null && currentLookbackMinutes !== null) {
+        const { data: minutePrices, error: pricesError } = await supabaseAdmin
+          .from('minute_prices')
+          .select('close_price, created_at')
+          .eq('asset', currentPair)
+          .order('created_at', { ascending: false })
+          .limit(currentLookbackMinutes);
+
+        let newReason = '';
+        if (pricesError) {
+          console.error(`[${functionName}] Error fetching minute prices for re-evaluation:`, pricesError);
+          newReason = `Error al obtener precios por minuto para re-evaluar: ${pricesError.message}`;
+        } else if (!minutePrices || minutePrices.length < currentLookbackMinutes) {
+          newReason = `No hay suficientes datos de precios por minuto (${minutePrices?.length || 0}/${currentLookbackMinutes}) para ${currentPair}.`;
+        } else {
+          const prices = minutePrices.map(p => p.close_price);
+          const currentPrice = prices[0];
+          const highPriceInLookback = Math.max(...prices);
+
+          const requiredDip = highPriceInLookback * (currentDipPercentage / 100);
+          const priceDrop = highPriceInLookback - currentPrice;
+
+          if (priceDrop >= requiredDip) {
+            // Opcional: Confirmación de rebote (precio actual > precio de cierre anterior)
+            if (prices.length > 1 && currentPrice > prices[1]) {
+              newReason = `Dip del ${currentDipPercentage}% detectado y rebote confirmado.`;
+            } else {
+              newReason = `Dip del ${currentDipPercentage}% detectado.`;
+            }
+          } else {
+            newReason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${currentDipPercentage}%)`;
+          }
+        }
+        updatePayload.error_message = newReason;
+        console.log(`[${functionName}] Re-evaluated error_message for trade ${tradeId}: ${newReason}`);
+      } else {
+        updatePayload.error_message = "Parámetros de estrategia incompletos para re-evaluar.";
+      }
+
     } else if (existingTrade.status === 'active') {
       // Si el trade está activo, solo se puede actualizar takeProfitPercentage y recalcular target_price
       if (takeProfitPercentage !== undefined) {
