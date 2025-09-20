@@ -55,7 +55,7 @@ serve(async (req) => {
     // 1. Obtener los detalles de la operación
     const { data: trade, error: fetchTradeError } = await supabaseAdmin
       .from(tableName)
-      .select('pair, asset_amount, user_id')
+      .select('id, pair, asset_amount, user_id') // Se añadió 'id' aquí
       .eq('id', tradeId)
       .eq('user_id', user.id) // Asegurar que el usuario es dueño de la operación
       .single();
@@ -217,7 +217,7 @@ serve(async (req) => {
     } else {
       // Fallback, aunque tradeType siempre debería ser 'manual' o 'signal'
       updatePayload.status = 'completed';
-      console.warn(`[${functionName}] Unknown tradeType '${tradeType}' for trade ${tradeId}. Defaulting to 'completed'.`);
+      console.warn(`[${functionName}] Unknown tradeType '${tradeType}' for trade ${trade.id}. Defaulting to 'completed'.`);
     }
 
     const { error: updateError } = await supabaseAdmin
