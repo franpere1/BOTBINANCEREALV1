@@ -17,6 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import HourlyPriceMonitor from '@/components/HourlyPriceMonitor'; // Importar el monitor de precios por hora
 
 interface SignalData {
   asset: string;
@@ -55,8 +56,8 @@ const formSchema = z.object({
   selectedAssets: z.array(z.string()).min(1, "Debes seleccionar al menos un activo."),
 });
 
-const fetchMlSignals = async (): Promise<SignalData[]> => { // Removed 'source' parameter
-  const { data, error } = await supabase.functions.invoke('get-ml-signals'); // Removed 'body' with source
+const fetchMlSignals = async (): Promise<SignalData[]> => {
+  const { data, error } = await supabase.functions.invoke('get-ml-signals');
   if (error) throw new Error(data?.error || error.message);
   return data as SignalData[];
 };
@@ -78,10 +79,8 @@ const SignalsTrading = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmittingBulkTrades, setIsSubmittingBulkTrades] = useState(false);
   
-  // Removed signalSource state and handleSourceChange function
-
   const { data: signals, isLoading, isError } = useQuery<SignalData[], Error>({
-    queryKey: ['mlSignals'], // Removed signalSource from query key
+    queryKey: ['mlSignals'],
     queryFn: fetchMlSignals,
     refetchInterval: 15000,
   });
@@ -104,7 +103,6 @@ const SignalsTrading = () => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      pair: '', // Removed as it's for bulk now
       usdtAmount: 10,
       takeProfitPercentage: 5,
       selectedAssets: [],
@@ -228,6 +226,7 @@ const SignalsTrading = () => {
   };
 
   const allSignalsForDisplay = signals || [];
+  const signalAssetsList = allSignalsForDisplay.map(s => s.asset); // Extraer la lista de activos
 
   return (
     <div className="space-y-8">
@@ -241,7 +240,6 @@ const SignalsTrading = () => {
           </p>
         </div>
         <div className="flex flex-col space-y-4 md:space-y-0 md:flex-row md:space-x-4 items-end">
-          {/* Removed SignalSourceToggle */}
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
@@ -344,8 +342,6 @@ const SignalsTrading = () => {
         </div>
       </div>
 
-      {/* Removed MinutePriceCollectorStatus */}
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {allSignalsForDisplay?.map((signal) => {
           return (
@@ -385,6 +381,10 @@ const SignalsTrading = () => {
             </Card>
           );
         })}
+      </div>
+
+      <div className="mt-8">
+        <HourlyPriceMonitor signalAssets={signalAssetsList} /> {/* Añadir el monitor de precios por hora aquí */}
       </div>
 
       <Card className="bg-gray-800 border-gray-700">

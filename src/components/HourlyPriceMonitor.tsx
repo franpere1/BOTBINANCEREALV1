@@ -15,12 +15,19 @@ interface HourlyPrice {
   timestamp: string;
 }
 
-const fetchLatestHourlyPrices = async (): Promise<HourlyPrice[]> => {
+interface HourlyPriceMonitorProps {
+  signalAssets: string[]; // Nueva prop para los activos de señales
+}
+
+const fetchLatestHourlyPrices = async (assets: string[]): Promise<HourlyPrice[]> => {
+  if (assets.length === 0) return [];
+
   const { data, error } = await supabase
     .from('hourly_prices')
     .select('*')
+    .in('asset', assets) // Filtrar por los activos de señales
     .order('timestamp', { ascending: false })
-    .limit(100); // Obtener los últimos 100 registros para mostrar
+    .limit(assets.length * 2); // Obtener suficientes registros para asegurar el más reciente de cada uno
 
   if (error) throw new Error(error.message);
 
@@ -34,10 +41,11 @@ const fetchLatestHourlyPrices = async (): Promise<HourlyPrice[]> => {
   return Array.from(latestPricesMap.values());
 };
 
-const HourlyPriceMonitor = () => {
+const HourlyPriceMonitor = ({ signalAssets }: HourlyPriceMonitorProps) => {
   const { data: hourlyPrices, isLoading, isError } = useQuery<HourlyPrice[], Error>({
-    queryKey: ['hourlyPrices'],
-    queryFn: fetchLatestHourlyPrices,
+    queryKey: ['hourlyPrices', signalAssets], // La clave de la query depende de signalAssets
+    queryFn: () => fetchLatestHourlyPrices(signalAssets),
+    enabled: signalAssets.length > 0, // Solo ejecutar la query si hay activos para monitorear
     refetchInterval: 60000, // Actualizar cada minuto para ver los cambios
   });
 
@@ -60,10 +68,10 @@ const HourlyPriceMonitor = () => {
       <CardHeader>
         <CardTitle className="text-yellow-400 flex items-center">
           <Clock className="mr-2 h-5 w-5" />
-          Precios por Hora Recolectados
+          Precios por Hora Recolectados (Señales)
         </CardTitle>
         <CardDescription className="text-gray-400">
-          Últimos precios de activos recolectados automáticamente cada hora.
+          Últimos precios de activos usados en señales, recolectados automáticamente cada hora.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -96,7 +104,7 @@ const HourlyPriceMonitor = () => {
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-center text-gray-400">No hay datos de precios por hora aún.</p>
+              <p className="text-center text-gray-400">No hay datos de precios por hora para los activos de señales aún.</p>
             )}
           </>
         )}

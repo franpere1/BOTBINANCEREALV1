@@ -1,6 +1,6 @@
 import ApiConfig from "@/components/ApiConfig";
 import BalanceDisplay from "@/components/BalanceDisplay";
-import HourlyPriceMonitor from "@/components/HourlyPriceMonitor"; // Importar el nuevo componente
+// import HourlyPriceMonitor from "@/components/HourlyPriceMonitor"; // Importar el nuevo componente
 
 const Index = () => {
   return (
@@ -17,7 +17,7 @@ const Index = () => {
       <div className="w-full space-y-8">
         <ApiConfig />
         <BalanceDisplay />
-        <HourlyPriceMonitor /> {/* Añadir el monitor de precios por hora */}
+        {/* <HourlyPriceMonitor /> */}
       </div>
     </div>
   );

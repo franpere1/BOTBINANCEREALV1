@@ -21,7 +21,8 @@ serve(async (req) => {
 
     console.log(`[${functionName}] Starting hourly price collection.`);
 
-    const assetsToCollect = ['BTCUSDT', 'ETHUSDT']; // Puedes añadir más activos aquí
+    // Lista ampliada de activos para recolectar, coincidiendo con los usados en get-ml-signals
+    const assetsToCollect = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
 
     for (const asset of assetsToCollect) {
       try {
