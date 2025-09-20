@@ -78,9 +78,9 @@ function calculateRSI(closes: number[], period: number): number {
   return 100 - (100 / (1 + rs));
 }
 
-// Function to get ML signal for a single asset using hourly_prices from DB
-async function getMlSignalForAssetFromDB(asset: string, supabaseAdmin: any) {
-  // 1. Obtener el precio actual del ticker (todavía de la API de Binance para precio en tiempo real)
+// Function to get ML signal for a single asset using Binance API
+async function getMlSignalForAssetFromBinance(asset: string) {
+  // 1. Obtener el precio actual del ticker
   const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${asset}`;
   const tickerResponse = await fetch(tickerPriceUrl);
   const tickerData = await tickerResponse.json();
@@ -89,26 +89,21 @@ async function getMlSignalForAssetFromDB(asset: string, supabaseAdmin: any) {
   }
   const currentPrice = parseFloat(tickerData.price);
 
-  // 2. Obtener las velas históricas de 1 hora de la tabla hourly_prices
-  const { data: hourlyKlines, error: dbError } = await supabaseAdmin
-    .from('hourly_prices')
-    .select('close_price')
-    .eq('asset', asset)
-    .order('created_at', { ascending: false }) // Obtener los más recientes primero
-    .limit(100); // Obtener suficientes datos de 1 hora para los cálculos
+  // 2. Obtener las velas históricas de 1 hora de la API de Binance
+  const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
+  const klinesResponse = await fetch(klinesUrl);
+  const klinesData = await klinesResponse.json();
 
-  if (dbError) {
-    console.error(`Error fetching hourly prices for ${asset} from DB:`, dbError);
-    throw new Error(`Error fetching hourly prices for ${asset}: ${dbError.message}`);
+  if (!klinesResponse.ok || klinesData.code) {
+    console.error(`Error fetching 1h klines for ${asset} from Binance API:`, klinesData);
+    throw new Error(`Error fetching 1h klines for ${asset}: ${klinesData.msg || 'Unknown error'}`);
   }
+  const closes = klinesData.map((k: any) => parseFloat(k[4])); // Close price is at index 4
 
-  if (!hourlyKlines || hourlyKlines.length < 50) { // Necesitamos al menos 50 velas para MA50
-    console.warn(`Not enough hourly klines data for ${asset} from DB. Skipping indicator calculations.`);
+  if (closes.length < 50) { // Necesitamos al menos 50 velas para MA50
+    console.warn(`Not enough 1h klines data for ${asset} from Binance API. Skipping indicator calculations.`);
     return { asset, signal: 'HOLD', confidence: 0, price: currentPrice };
   }
-
-  // Extraer los precios de cierre de las velas horarias para los cálculos de indicadores
-  const closes = hourlyKlines.map((k: any) => parseFloat(k.close_price));
 
   // Calcular Indicadores
   const ma20 = calculateSMA(closes, 20);
@@ -255,8 +250,8 @@ serve(async (req) => {
         if (trade.status === 'awaiting_buy_signal') {
           // Lógica para operaciones esperando señal de compra
           console.log(`[monitor-trades] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal.`);
-          // Usar la función actualizada que obtiene datos de la DB
-          const mlSignal = await getMlSignalForAssetFromDB(trade.pair, supabaseAdmin);
+          // Usar la función actualizada que obtiene datos de la API de Binance
+          const mlSignal = await getMlSignalForAssetFromBinance(trade.pair);
 
           if (mlSignal.signal === 'BUY' && mlSignal.confidence >= 70) {
             console.log(`[monitor-trades] BUY signal detected for ${trade.pair} with ${mlSignal.confidence.toFixed(1)}% confidence. Initiating buy order.`);

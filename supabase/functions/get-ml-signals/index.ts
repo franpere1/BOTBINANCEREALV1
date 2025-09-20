@@ -83,12 +83,12 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    // No longer need supabaseAdmin for fetching klines here
+    // const supabaseAdmin = createClient(
+    //   Deno.env.get('SUPABASE_URL') ?? '',
+    //   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    // );
 
-    const { source } = await req.json(); // 'binance-api' or 'supabase-db'
     const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
     const signalsData = [];
 
@@ -104,69 +104,36 @@ serve(async (req) => {
       const currentPrice = parseFloat(tickerData.price);
 
       let closes: number[] = [];
-      let klinesSourceMessage = '';
+      let klinesSourceMessage = 'Binance API (1h klines)'; // Always Binance API now
 
-      if (source === 'binance-api') {
-        // Lógica para obtener velas de 1 hora directamente de Binance (comportamiento anterior)
-        klinesSourceMessage = 'Binance API (1h klines)';
-        const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
-        const klinesResponse = await fetch(klinesUrl);
-        const klinesData = await klinesResponse.json();
+      // Lógica para obtener velas de 1 hora directamente de Binance
+      const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
+      const klinesResponse = await fetch(klinesUrl);
+      const klinesData = await klinesResponse.json();
 
-        if (!klinesResponse.ok || klinesData.code) {
-          console.error(`Error fetching 1h klines for ${asset} from Binance API:`, klinesData);
-          throw new Error(`Error fetching 1h klines for ${asset}: ${klinesData.msg || 'Unknown error'}`);
-        }
-        closes = klinesData.map((k: any) => parseFloat(k[4])); // Close price is at index 4
+      if (!klinesResponse.ok || klinesData.code) {
+        console.error(`Error fetching 1h klines for ${asset} from Binance API:`, klinesData);
+        throw new Error(`Error fetching 1h klines for ${asset}: ${klinesData.msg || 'Unknown error'}`);
+      }
+      closes = klinesData.map((k: any) => parseFloat(k[4])); // Close price is at index 4
 
-        if (closes.length < 50) { // Necesitamos al menos 50 velas para MA50
-          console.warn(`Not enough 1h klines data for ${asset} from Binance API. Skipping indicator calculations.`);
-          signalsData.push({
-            asset: asset,
-            prediction: asset,
-            signal: 'HOLD',
-            confidence: 0,
-            price: currentPrice,
-            rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
-            upperBand: 0, lowerBand: 0, volatility: 0,
-            lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          });
-          continue;
-        }
-
-      } else {
-        // Lógica para obtener velas de 1 hora de la DB (nueva implementación)
-        klinesSourceMessage = 'Supabase DB (1h klines)';
-        const { data: hourlyKlines, error: dbError } = await supabaseAdmin
-          .from('hourly_prices')
-          .select('close_price')
-          .eq('asset', asset)
-          .order('created_at', { ascending: false })
-          .limit(100); // Obtener suficientes datos de 1 hora para los cálculos
-
-        if (dbError) {
-          console.error(`Error fetching hourly prices for ${asset} from DB:`, dbError);
-          throw new Error(`Error fetching hourly prices for ${asset}: ${dbError.message}`);
-        }
-
-        if (!hourlyKlines || hourlyKlines.length < 50) { // Necesitamos al menos 50 velas para MA50
-          console.warn(`Not enough hourly klines data for ${asset} from DB. Skipping indicator calculations.`);
-          signalsData.push({
-            asset: asset,
-            prediction: asset,
-            signal: 'HOLD',
-            confidence: 0,
-            price: currentPrice,
-            rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
-            upperBand: 0, lowerBand: 0, volatility: 0,
-            lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          });
-          continue;
-        }
-        closes = hourlyKlines.map((k: any) => parseFloat(k.close_price));
+      if (closes.length < 50) { // Necesitamos al menos 50 velas para MA50
+        console.warn(`Not enough 1h klines data for ${asset} from Binance API. Skipping indicator calculations.`);
+        signalsData.push({
+          asset: asset,
+          prediction: asset,
+          signal: 'HOLD',
+          confidence: 0,
+          price: currentPrice,
+          rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
+          upperBand: 0, lowerBand: 0, volatility: 0,
+          lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          klinesSource: klinesSourceMessage,
+        });
+        continue;
       }
 
-      // Calcular Indicadores (común para ambas fuentes de datos)
+      // Calcular Indicadores
       const ma20 = calculateSMA(closes, 20);
       const ma50 = calculateSMA(closes, 50);
       const rsi = calculateRSI(closes, 14);
@@ -177,7 +144,7 @@ serve(async (req) => {
       const macdSignalLineSeries = calculateEMASeries(macdLineData, 9);
 
       const macd = macdLineData.length > 0 ? macdLineData[macdLineData.length - 1] : 0;
-      const macdSignal = macdSignalLineLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
+      const macdSignal = macdSignalLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
       const histMacd = macd - macdSignal;
 
       const bbPeriod = 20;

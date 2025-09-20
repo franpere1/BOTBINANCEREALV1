@@ -5,12 +5,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play, Trash2 } from "lucide-react";
+import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play } from "lucide-react";
 import { showError, showSuccess } from '@/utils/toast';
 import { useAuth } from '@/context/AuthProvider';
 import ActiveSignalTrades from '@/components/ActiveSignalTrades';
-import MinutePriceCollectorStatus from '@/components/MinutePriceCollectorStatus';
-import SignalSourceToggle from '@/components/SignalSourceToggle'; // Importar el nuevo componente
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -36,7 +34,7 @@ interface SignalData {
   lowerBand: number;
   volatility: number;
   lastUpdate: string;
-  klinesSource?: string; // Nuevo campo para mostrar la fuente de los klines
+  klinesSource?: string; 
 }
 
 interface SignalTrade {
@@ -57,10 +55,8 @@ const formSchema = z.object({
   selectedAssets: z.array(z.string()).min(1, "Debes seleccionar al menos un activo."),
 });
 
-const fetchMlSignals = async (source: 'binance-api' | 'supabase-db'): Promise<SignalData[]> => {
-  const { data, error } = await supabase.functions.invoke('get-ml-signals', {
-    body: { source },
-  });
+const fetchMlSignals = async (): Promise<SignalData[]> => { // Removed 'source' parameter
+  const { data, error } = await supabase.functions.invoke('get-ml-signals'); // Removed 'body' with source
   if (error) throw new Error(data?.error || error.message);
   return data as SignalData[];
 };
@@ -81,23 +77,12 @@ const SignalsTrading = () => {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmittingBulkTrades, setIsSubmittingBulkTrades] = useState(false);
-  const [signalSource, setSignalSource] = useState<'binance-api' | 'supabase-db'>(() => {
-    // Leer la preferencia del localStorage o usar 'supabase-db' como predeterminado
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('signalSource') as 'binance-api' | 'supabase-db') || 'supabase-db';
-    }
-    return 'supabase-db';
-  });
-
-  const handleSourceChange = (newSource: 'binance-api' | 'supabase-db') => {
-    setSignalSource(newSource);
-    localStorage.setItem('signalSource', newSource);
-    queryClient.invalidateQueries({ queryKey: ['mlSignals'] }); // Invalidar para recargar con la nueva fuente
-  };
+  
+  // Removed signalSource state and handleSourceChange function
 
   const { data: signals, isLoading, isError } = useQuery<SignalData[], Error>({
-    queryKey: ['mlSignals', signalSource], // Incluir signalSource en la clave de la query
-    queryFn: () => fetchMlSignals(signalSource),
+    queryKey: ['mlSignals'], // Removed signalSource from query key
+    queryFn: fetchMlSignals,
     refetchInterval: 15000,
   });
 
@@ -119,6 +104,7 @@ const SignalsTrading = () => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      pair: '', // Removed as it's for bulk now
       usdtAmount: 10,
       takeProfitPercentage: 5,
       selectedAssets: [],
@@ -255,7 +241,7 @@ const SignalsTrading = () => {
           </p>
         </div>
         <div className="flex flex-col space-y-4 md:space-y-0 md:flex-row md:space-x-4 items-end">
-          <SignalSourceToggle onSourceChange={handleSourceChange} currentSource={signalSource} />
+          {/* Removed SignalSourceToggle */}
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
@@ -358,7 +344,7 @@ const SignalsTrading = () => {
         </div>
       </div>
 
-      <MinutePriceCollectorStatus />
+      {/* Removed MinutePriceCollectorStatus */}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {allSignalsForDisplay?.map((signal) => {
