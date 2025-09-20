@@ -77,52 +77,6 @@ function calculateRSI(closes: number[], period: number): number {
   return 100 - (100 / (1 + rs));
 }
 
-// Helper function to aggregate 1-minute klines into 1-hour klines
-function aggregateToHourlyKlines(minuteKlines: any[]): any[] {
-  const hourlyKlines: any[] = [];
-  if (minuteKlines.length === 0) return hourlyKlines;
-
-  // Ordenar por created_at ascendente para asegurar el orden correcto de agregación
-  minuteKlines.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-  let currentHourlyKline: any = null;
-  let currentHourStartTimestamp = 0; // Timestamp Unix para el inicio de la hora actual
-
-  for (const kline of minuteKlines) {
-    const klineTime = new Date(kline.created_at).getTime();
-    // Calcular el inicio de la hora para la vela actual
-    const hourStart = Math.floor(klineTime / (1000 * 60 * 60)) * (1000 * 60 * 60);
-
-    if (currentHourlyKline === null || hourStart !== currentHourStartTimestamp) {
-      // Si es una nueva hora, añadir la vela horaria anterior (si existe) y empezar una nueva
-      if (currentHourlyKline !== null) {
-        hourlyKlines.push(currentHourlyKline);
-      }
-      currentHourStartTimestamp = hourStart;
-      currentHourlyKline = {
-        open_price: parseFloat(kline.open_price),
-        high_price: parseFloat(kline.high_price),
-        low_price: parseFloat(kline.low_price),
-        close_price: parseFloat(kline.close_price),
-        volume: parseFloat(kline.volume),
-        created_at: new Date(hourStart).toISOString(),
-      };
-    } else {
-      // Si es la misma hora, actualizar máximo, mínimo, cierre y sumar volumen
-      currentHourlyKline.high_price = Math.max(currentHourlyKline.high_price, parseFloat(kline.high_price));
-      currentHourlyKline.low_price = Math.min(currentHourlyKline.low_price, parseFloat(kline.low_price));
-      currentHourlyKline.close_price = parseFloat(kline.close_price); // El cierre del último minuto es el cierre horario
-      currentHourlyKline.volume += parseFloat(kline.volume);
-    }
-  }
-  // Añadir la última vela horaria agregada
-  if (currentHourlyKline !== null) {
-    hourlyKlines.push(currentHourlyKline);
-  }
-  return hourlyKlines;
-}
-
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -181,39 +135,22 @@ serve(async (req) => {
         }
 
       } else {
-        // Lógica para obtener velas de 1 minuto de la DB y agregarlas (comportamiento nuevo/por defecto)
-        klinesSourceMessage = 'Supabase DB (1m klines aggregated)';
-        const { data: minuteKlines, error: dbError } = await supabaseAdmin
-          .from('minute_prices')
-          .select('open_price, high_price, low_price, close_price, volume, created_at')
+        // Lógica para obtener velas de 1 hora de la DB (nueva implementación)
+        klinesSourceMessage = 'Supabase DB (1h klines)';
+        const { data: hourlyKlines, error: dbError } = await supabaseAdmin
+          .from('hourly_prices')
+          .select('close_price')
           .eq('asset', asset)
           .order('created_at', { ascending: false })
-          .limit(6000);
+          .limit(100); // Obtener suficientes datos de 1 hora para los cálculos
 
         if (dbError) {
-          console.error(`Error fetching minute prices for ${asset} from DB:`, dbError);
-          throw new Error(`Error fetching minute prices for ${asset}: ${dbError.message}`);
+          console.error(`Error fetching hourly prices for ${asset} from DB:`, dbError);
+          throw new Error(`Error fetching hourly prices for ${asset}: ${dbError.message}`);
         }
 
-        if (!minuteKlines || minuteKlines.length < 60) {
-          console.warn(`Not enough minute klines data for ${asset} from DB. Skipping indicator calculations.`);
-          signalsData.push({
-            asset: asset,
-            prediction: asset,
-            signal: 'HOLD',
-            confidence: 0,
-            price: currentPrice,
-            rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
-            upperBand: 0, lowerBand: 0, volatility: 0,
-            lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          });
-          continue;
-        }
-
-        const hourlyKlines = aggregateToHourlyKlines(minuteKlines);
-
-        if (hourlyKlines.length < 50) {
-          console.warn(`Not enough aggregated hourly klines data for ${asset}. Skipping indicator calculations.`);
+        if (!hourlyKlines || hourlyKlines.length < 50) { // Necesitamos al menos 50 velas para MA50
+          console.warn(`Not enough hourly klines data for ${asset} from DB. Skipping indicator calculations.`);
           signalsData.push({
             asset: asset,
             prediction: asset,
@@ -240,7 +177,7 @@ serve(async (req) => {
       const macdSignalLineSeries = calculateEMASeries(macdLineData, 9);
 
       const macd = macdLineData.length > 0 ? macdLineData[macdLineData.length - 1] : 0;
-      const macdSignal = macdSignalLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
+      const macdSignal = macdSignalLineLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
       const histMacd = macd - macdSignal;
 
       const bbPeriod = 20;
