@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0'; // Necesario para consultar la tabla minute_prices
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -134,11 +134,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    const { source } = await req.json(); // 'binance-api' or 'supabase-db'
     const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
     const signalsData = [];
 
     for (const asset of assets) {
-      // 1. Obtener el precio actual del ticker (todavía de la API de Binance para precio en tiempo real)
+      // 1. Obtener el precio actual del ticker (siempre de la API de Binance para precio en tiempo real)
       const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${asset}`;
       const tickerResponse = await fetch(tickerPriceUrl);
       const tickerData = await tickerResponse.json();
@@ -148,68 +149,93 @@ serve(async (req) => {
       }
       const currentPrice = parseFloat(tickerData.price);
 
-      // 2. Obtener las velas históricas de 1 minuto de la tabla minute_prices
-      // Necesitamos suficientes datos para formar al menos 100 velas de 1 hora, es decir, 6000 registros de 1 minuto
-      const { data: minuteKlines, error: dbError } = await supabaseAdmin
-        .from('minute_prices')
-        .select('open_price, high_price, low_price, close_price, volume, created_at')
-        .eq('asset', asset)
-        .order('created_at', { ascending: false }) // Obtener los más recientes primero
-        .limit(6000); // Obtener suficientes datos de 1 minuto para 100 velas de 1 hora
+      let closes: number[] = [];
+      let klinesSourceMessage = '';
 
-      if (dbError) {
-        console.error(`Error fetching minute prices for ${asset} from DB:`, dbError);
-        throw new Error(`Error fetching minute prices for ${asset}: ${dbError.message}`);
+      if (source === 'binance-api') {
+        // Lógica para obtener velas de 1 hora directamente de Binance (comportamiento anterior)
+        klinesSourceMessage = 'Binance API (1h klines)';
+        const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
+        const klinesResponse = await fetch(klinesUrl);
+        const klinesData = await klinesResponse.json();
+
+        if (!klinesResponse.ok || klinesData.code) {
+          console.error(`Error fetching 1h klines for ${asset} from Binance API:`, klinesData);
+          throw new Error(`Error fetching 1h klines for ${asset}: ${klinesData.msg || 'Unknown error'}`);
+        }
+        closes = klinesData.map((k: any) => parseFloat(k[4])); // Close price is at index 4
+
+        if (closes.length < 50) { // Necesitamos al menos 50 velas para MA50
+          console.warn(`Not enough 1h klines data for ${asset} from Binance API. Skipping indicator calculations.`);
+          signalsData.push({
+            asset: asset,
+            prediction: asset,
+            signal: 'HOLD',
+            confidence: 0,
+            price: currentPrice,
+            rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
+            upperBand: 0, lowerBand: 0, volatility: 0,
+            lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          });
+          continue;
+        }
+
+      } else {
+        // Lógica para obtener velas de 1 minuto de la DB y agregarlas (comportamiento nuevo/por defecto)
+        klinesSourceMessage = 'Supabase DB (1m klines aggregated)';
+        const { data: minuteKlines, error: dbError } = await supabaseAdmin
+          .from('minute_prices')
+          .select('open_price, high_price, low_price, close_price, volume, created_at')
+          .eq('asset', asset)
+          .order('created_at', { ascending: false })
+          .limit(6000);
+
+        if (dbError) {
+          console.error(`Error fetching minute prices for ${asset} from DB:`, dbError);
+          throw new Error(`Error fetching minute prices for ${asset}: ${dbError.message}`);
+        }
+
+        if (!minuteKlines || minuteKlines.length < 60) {
+          console.warn(`Not enough minute klines data for ${asset} from DB. Skipping indicator calculations.`);
+          signalsData.push({
+            asset: asset,
+            prediction: asset,
+            signal: 'HOLD',
+            confidence: 0,
+            price: currentPrice,
+            rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
+            upperBand: 0, lowerBand: 0, volatility: 0,
+            lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          });
+          continue;
+        }
+
+        const hourlyKlines = aggregateToHourlyKlines(minuteKlines);
+
+        if (hourlyKlines.length < 50) {
+          console.warn(`Not enough aggregated hourly klines data for ${asset}. Skipping indicator calculations.`);
+          signalsData.push({
+            asset: asset,
+            prediction: asset,
+            signal: 'HOLD',
+            confidence: 0,
+            price: currentPrice,
+            rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
+            upperBand: 0, lowerBand: 0, volatility: 0,
+            lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          });
+          continue;
+        }
+        closes = hourlyKlines.map((k: any) => parseFloat(k.close_price));
       }
 
-      if (!minuteKlines || minuteKlines.length < 60) { // Necesitamos al menos 60 minutos para una vela horaria completa
-        console.warn(`Not enough minute klines data for ${asset} from DB. Skipping indicator calculations.`);
-        signalsData.push({
-          asset: asset,
-          prediction: asset,
-          signal: 'HOLD', // Señal por defecto
-          confidence: 0,
-          price: currentPrice,
-          rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
-          upperBand: 0, lowerBand: 0, volatility: 0,
-          lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        });
-        continue;
-      }
-
-      // 3. Agrupar las velas de 1 minuto en velas de 1 hora
-      const hourlyKlines = aggregateToHourlyKlines(minuteKlines);
-
-      // Asegurarse de tener suficientes puntos de datos horarios agregados (al menos 50 para MA50)
-      if (hourlyKlines.length < 50) {
-        console.warn(`Not enough aggregated hourly klines data for ${asset}. Skipping indicator calculations.`);
-        signalsData.push({
-          asset: asset,
-          prediction: asset,
-          signal: 'HOLD', // Señal por defecto
-          confidence: 0,
-          price: currentPrice,
-          rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
-          upperBand: 0, lowerBand: 0, volatility: 0,
-          lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        });
-        continue;
-      }
-
-      // Extraer los precios de cierre de las velas horarias agregadas para los cálculos de indicadores
-      const closes = hourlyKlines.map((k: any) => parseFloat(k.close_price));
-
-      // Calcular Indicadores
+      // Calcular Indicadores (común para ambas fuentes de datos)
       const ma20 = calculateSMA(closes, 20);
       const ma50 = calculateSMA(closes, 50);
+      const rsi = calculateRSI(closes, 14);
 
-      const rsi = calculateRSI(closes, 14); // RSI de 14 períodos
-
-      // MACD
       const ema12Series = calculateEMASeries(closes, 12);
       const ema26Series = calculateEMASeries(closes, 26);
-      
-      // Alinear el cálculo de la línea MACD a la serie EMA más corta
       const macdLineData = ema12Series.slice(ema12Series.length - ema26Series.length).map((e12, i) => e12 - ema26Series[i]);
       const macdSignalLineSeries = calculateEMASeries(macdLineData, 9);
 
@@ -217,72 +243,55 @@ serve(async (req) => {
       const macdSignal = macdSignalLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
       const histMacd = macd - macdSignal;
 
-      // Bandas de Bollinger (usando SMA de 20 períodos y 2 desviaciones estándar)
       const bbPeriod = 20;
       const bbMiddleBand = calculateSMA(closes, bbPeriod);
       const stdDev = calculateStdDev(closes, bbPeriod);
       const upperBand = bbMiddleBand + (stdDev * 2);
       const lowerBand = bbMiddleBand - (stdDev * 2);
 
-      // Volatilidad (usando la desviación estándar de los precios de cierre recientes)
-      const volatility = (stdDev / currentPrice) * 100; // Volatilidad en porcentaje
+      const volatility = (stdDev / currentPrice) * 100;
 
-      // --- Lógica Dinámica de Señal y Confianza ---
       let signal: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
       let confidence = 0;
-      let rawScore = 0; // Rango de -100 (venta fuerte) a 100 (compra fuerte)
+      let rawScore = 0;
 
-      // Puntuación RSI (valores RSI más extremos dan puntuaciones más altas)
-      if (rsi < 30) rawScore += 30; // Muy sobrevendido
-      else if (rsi < 40) rawScore += 15; // Moderadamente sobrevendido
-      else if (rsi > 70) rawScore -= 30; // Muy sobrecomprado
-      else if (rsi > 60) rawScore -= 15; // Moderadamente sobrecomprado
+      if (rsi < 30) rawScore += 30;
+      else if (rsi < 40) rawScore += 15;
+      else if (rsi > 70) rawScore -= 30;
+      else if (rsi > 60) rawScore -= 15;
 
-      // Puntuación MACD (cruce y dirección del histograma)
-      if (macd > macdSignal && histMacd > 0) rawScore += 25; // Cruce alcista con impulso positivo
-      else if (macd < macdSignal && histMacd < 0) rawScore -= 25; // Cruce bajista con impulso negativo
+      if (macd > macdSignal && histMacd > 0) rawScore += 25;
+      else if (macd < macdSignal && histMacd < 0) rawScore -= 25;
 
-      // Precio vs MA20
       if (currentPrice > ma20) rawScore += 20;
       else if (currentPrice < ma20) rawScore -= 20;
 
-      // Precio vs MA50
       if (currentPrice > ma50) rawScore += 15;
       else if (currentPrice < ma50) rawScore -= 15;
 
-      // Bandas de Bollinger
-      if (currentPrice < lowerBand) rawScore += 10; // Precio por debajo de la banda inferior (potencial rebote al alza)
-      else if (currentPrice > upperBand) rawScore -= 10; // Precio por encima de la banda superior (potencial retroceso)
+      if (currentPrice < lowerBand) rawScore += 10;
+      else if (currentPrice > upperBand) rawScore -= 10;
 
-      // Determinar la señal basándose en los umbrales de rawScore
-      if (rawScore >= 20) { // Umbral de puntuación positiva para COMPRA
+      if (rawScore >= 20) {
         signal = 'BUY';
-      } else if (rawScore <= -20) { // Umbral de puntuación negativa para VENTA
+      } else if (rawScore <= -20) {
         signal = 'SELL';
       } else {
-        signal = 'HOLD';
-      }
-
-      // Mapear rawScore a confianza [0-100] basándose en la señal determinada
-      if (signal === 'BUY') {
-        // Escalar rawScore de [20, 100] a confianza [50, 100]
-        // Asegurar que la confianza mínima para una señal de COMPRA sea 50
-        confidence = 50 + Math.max(0, (rawScore - 20) / 80) * 50;
-      } else if (signal === 'SELL') {
-        // Escalar rawScore de [-100, -20] a confianza [0, 49.9]
-        // Asegurar que la confianza máxima para una señal de VENTA sea 49.9
-        confidence = 49.9 - Math.max(0, (Math.abs(rawScore) - 20) / 80) * 49.9;
-      } else { // HOLD
-        // Escalar rawScore de [-20, 20] a confianza [40, 60] (centrado en 50)
         confidence = 50 + (rawScore / 20) * 10;
       }
 
-      // Límite final para asegurar que la confianza esté entre [0, 100]
+      if (signal === 'BUY') {
+        confidence = 50 + Math.max(0, (rawScore - 20) / 80) * 50;
+      } else if (signal === 'SELL') {
+        confidence = 49.9 - Math.max(0, (Math.abs(rawScore) - 20) / 80) * 49.9;
+      } else {
+        confidence = 50 + (rawScore / 20) * 10;
+      }
       confidence = Math.max(0, Math.min(100, confidence));
 
       signalsData.push({
         asset: asset,
-        prediction: asset, // Marcador de posición
+        prediction: asset,
         signal: signal,
         confidence: confidence,
         price: currentPrice,
@@ -296,6 +305,7 @@ serve(async (req) => {
         lowerBand: lowerBand,
         volatility: volatility,
         lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        klinesSource: klinesSourceMessage, // Añadir la fuente de los klines para depuración
       });
     }
 

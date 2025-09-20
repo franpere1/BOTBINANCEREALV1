@@ -9,7 +9,8 @@ import { AlertCircle, TrendingUp, TrendingDown, PauseCircle, Play, Trash2 } from
 import { showError, showSuccess } from '@/utils/toast';
 import { useAuth } from '@/context/AuthProvider';
 import ActiveSignalTrades from '@/components/ActiveSignalTrades';
-import MinutePriceCollectorStatus from '@/components/MinutePriceCollectorStatus'; // Importar el nuevo componente
+import MinutePriceCollectorStatus from '@/components/MinutePriceCollectorStatus';
+import SignalSourceToggle from '@/components/SignalSourceToggle'; // Importar el nuevo componente
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -35,9 +36,9 @@ interface SignalData {
   lowerBand: number;
   volatility: number;
   lastUpdate: string;
+  klinesSource?: string; // Nuevo campo para mostrar la fuente de los klines
 }
 
-// Reutilizar la interfaz de ActiveSignalTrades para consistencia
 interface SignalTrade {
   id: string;
   pair: string;
@@ -56,13 +57,14 @@ const formSchema = z.object({
   selectedAssets: z.array(z.string()).min(1, "Debes seleccionar al menos un activo."),
 });
 
-const fetchMlSignals = async (): Promise<SignalData[]> => {
-  const { data, error } = await supabase.functions.invoke('get-ml-signals');
+const fetchMlSignals = async (source: 'binance-api' | 'supabase-db'): Promise<SignalData[]> => {
+  const { data, error } = await supabase.functions.invoke('get-ml-signals', {
+    body: { source },
+  });
   if (error) throw new Error(data?.error || error.message);
   return data as SignalData[];
 };
 
-// Reutilizar la función de ActiveSignalTrades para obtener las operaciones del usuario
 const fetchUserSignalTrades = async (userId: string) => {
   const { data, error } = await supabase
     .from('signal_trades')
@@ -79,19 +81,31 @@ const SignalsTrading = () => {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmittingBulkTrades, setIsSubmittingBulkTrades] = useState(false);
-  // isActionLoading ya no es necesario aquí, solo en ActiveSignalTrades
+  const [signalSource, setSignalSource] = useState<'binance-api' | 'supabase-db'>(() => {
+    // Leer la preferencia del localStorage o usar 'supabase-db' como predeterminado
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('signalSource') as 'binance-api' | 'supabase-db') || 'supabase-db';
+    }
+    return 'supabase-db';
+  });
+
+  const handleSourceChange = (newSource: 'binance-api' | 'supabase-db') => {
+    setSignalSource(newSource);
+    localStorage.setItem('signalSource', newSource);
+    queryClient.invalidateQueries({ queryKey: ['mlSignals'] }); // Invalidar para recargar con la nueva fuente
+  };
 
   const { data: signals, isLoading, isError } = useQuery<SignalData[], Error>({
-    queryKey: ['mlSignals'],
-    queryFn: fetchMlSignals,
-    refetchInterval: 15000, // Refrescar cada 15 segundos
+    queryKey: ['mlSignals', signalSource], // Incluir signalSource en la clave de la query
+    queryFn: () => fetchMlSignals(signalSource),
+    refetchInterval: 15000,
   });
 
   const { data: userSignalTrades, isLoading: isLoadingUserTrades } = useQuery<SignalTrade[], Error>({
     queryKey: ['userSignalTrades'],
     queryFn: () => fetchUserSignalTrades(user!.id),
     enabled: !!user,
-    refetchInterval: 10000, // Sincronizar con ActiveSignalTrades
+    refetchInterval: 10000,
   });
 
   const userTradesMap = React.useMemo(() => {
@@ -148,7 +162,7 @@ const SignalsTrading = () => {
       }
 
       queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
-      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] }); // Invalidar para actualizar los botones en las tarjetas
+      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
       setIsDialogOpen(false);
       form.reset();
     } catch (error: any) {
@@ -157,8 +171,6 @@ const SignalsTrading = () => {
       setIsSubmittingBulkTrades(false);
     }
   };
-
-  // handleCardAction ya no es necesario aquí, solo en ActiveSignalTrades
 
   if (isError) {
     showError(`Error al cargar las señales de trading: ${isError.message}`);
@@ -233,7 +245,7 @@ const SignalsTrading = () => {
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 space-y-4 md:space-y-0">
         <div className="text-left">
           <h2 className="text-4xl font-bold mb-4 text-yellow-400">
             Trading por Señales de ML
@@ -242,112 +254,114 @@ const SignalsTrading = () => {
             Análisis de mercado en tiempo real y predicciones de Machine Learning para ayudarte a tomar decisiones.
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
-              <Play className="mr-2 h-5 w-5" />
-              Configurar Monitoreo de Señales
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
-            <DialogHeader>
-              <DialogTitle className="text-yellow-400">Configurar Monitoreo de Operaciones por Señal</DialogTitle>
-              <DialogDescription className="text-gray-400">
-                Selecciona los activos que deseas monitorear. El sistema iniciará automáticamente una operación de compra
-                cuando se detecte una señal de COMPRA con 70% o más de confianza para el activo seleccionado.
-              </DialogDescription>
-            </DialogHeader>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(handleBulkTradeSubmit)} className="grid gap-4 py-4">
-                <FormField
-                  control={form.control}
-                  name="usdtAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-gray-300">Cantidad por Trade (USDT)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" {...field} className="bg-gray-700 border-gray-600 text-white" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="takeProfitPercentage"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-gray-300">Ganancia Objetivo (%)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.1" {...field} className="bg-gray-700 border-gray-600 text-white" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="selectedAssets"
-                  render={({ field: innerField }) => (
-                    <FormItem>
-                      <FormLabel className="text-gray-300">Activos para Monitorear</FormLabel>
-                      <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
-                        {allSignalsForDisplay.length > 0 ? (
-                          allSignalsForDisplay.map((signal) => (
-                            <FormField
-                              key={signal.asset}
-                              control={form.control}
-                              name="selectedAssets"
-                              render={({ field }) => {
-                                return (
-                                  <FormItem className="flex flex-row items-start space-x-3 space-y-0">
-                                    <FormControl>
-                                      <Checkbox
-                                        checked={field.value?.includes(signal.asset)}
-                                        onCheckedChange={(checked) => {
-                                          return checked
-                                            ? field.onChange([...field.value, signal.asset])
-                                            : field.onChange(
-                                                field.value?.filter(
-                                                  (value) => value !== signal.asset
-                                                )
-                                              );
-                                        }}
-                                        className="border-gray-500 data-[state=checked]:bg-yellow-500 data-[state=checked]:text-gray-900"
-                                      />
-                                    </FormControl>
-                                    <FormLabel className="font-normal text-gray-300">
-                                      {signal.asset} ({signal.signal} - {signal.confidence.toFixed(1)}%)
-                                    </FormLabel>
-                                  </FormItem>
-                                );
-                              }}
-                            />
-                          ))
-                        ) : (
-                          <p className="text-gray-500 col-span-2">No hay activos disponibles para monitorear en este momento.</p>
-                        )}
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <DialogFooter className="mt-4">
-                  <Button type="submit" disabled={isSubmittingBulkTrades} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
-                    {isSubmittingBulkTrades ? 'Configurando Monitoreo...' : 'Configurar Monitoreo'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex flex-col space-y-4 md:space-y-0 md:flex-row md:space-x-4 items-end">
+          <SignalSourceToggle onSourceChange={handleSourceChange} currentSource={signalSource} />
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
+                <Play className="mr-2 h-5 w-5" />
+                Configurar Monitoreo de Señales
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
+              <DialogHeader>
+                <DialogTitle className="text-yellow-400">Configurar Monitoreo de Operaciones por Señal</DialogTitle>
+                <DialogDescription className="text-gray-400">
+                  Selecciona los activos que deseas monitorear. El sistema iniciará automáticamente una operación de compra
+                  cuando se detecte una señal de COMPRA con 70% o más de confianza para el activo seleccionado.
+                </DialogDescription>
+              </DialogHeader>
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(handleBulkTradeSubmit)} className="grid gap-4 py-4">
+                  <FormField
+                    control={form.control}
+                    name="usdtAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Cantidad por Trade (USDT)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.01" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="takeProfitPercentage"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Ganancia Objetivo (%)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.1" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="selectedAssets"
+                    render={({ field: innerField }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Activos para Monitorear</FormLabel>
+                        <div className="grid grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-2">
+                          {allSignalsForDisplay.length > 0 ? (
+                            allSignalsForDisplay.map((signal) => (
+                              <FormField
+                                key={signal.asset}
+                                control={form.control}
+                                name="selectedAssets"
+                                render={({ field }) => {
+                                  return (
+                                    <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                                      <FormControl>
+                                        <Checkbox
+                                          checked={field.value?.includes(signal.asset)}
+                                          onCheckedChange={(checked) => {
+                                            return checked
+                                              ? field.onChange([...field.value, signal.asset])
+                                              : field.onChange(
+                                                  field.value?.filter(
+                                                    (value) => value !== signal.asset
+                                                  )
+                                                );
+                                          }}
+                                          className="border-gray-500 data-[state=checked]:bg-yellow-500 data-[state=checked]:text-gray-900"
+                                        />
+                                      </FormControl>
+                                      <FormLabel className="font-normal text-gray-300">
+                                        {signal.asset} ({signal.signal} - {signal.confidence.toFixed(1)}%)
+                                      </FormLabel>
+                                    </FormItem>
+                                  );
+                                }}
+                              />
+                            ))
+                          ) : (
+                            <p className="text-gray-500 col-span-2">No hay activos disponibles para monitorear en este momento.</p>
+                          )}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <DialogFooter className="mt-4">
+                    <Button type="submit" disabled={isSubmittingBulkTrades} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
+                      {isSubmittingBulkTrades ? 'Configurando Monitoreo...' : 'Configurar Monitoreo'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
-      <MinutePriceCollectorStatus /> {/* Nuevo componente aquí */}
+      <MinutePriceCollectorStatus />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {signals?.map((signal) => {
-          // const existingUserTrade = userTradesMap.get(signal.asset); // Ya no se usa aquí
+        {allSignalsForDisplay?.map((signal) => {
           return (
             <Card key={signal.asset} className="bg-gray-800 border-gray-700 text-white">
               <CardHeader className="pb-2">
@@ -380,7 +394,7 @@ const SignalsTrading = () => {
                   <p className="text-gray-400">Banda Inferior: <span className="text-white font-semibold">${signal.lowerBand.toFixed(4)}</span></p>
                 </div>
                 <p className="text-gray-500 text-xs mt-2">Última actualización: {signal.lastUpdate}</p>
-                {/* Botones de acción eliminados de aquí */}
+                <p className="text-gray-500 text-xs">Fuente de Klines: {signal.klinesSource}</p>
               </CardContent>
             </Card>
           );
