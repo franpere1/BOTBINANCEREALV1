@@ -200,15 +200,15 @@ serve(async (req) => {
 
     console.log(`[${functionName}] Starting monitoring cycle.`);
 
-    // 1. Obtener todas las operaciones activas (manuales y de señales)
+    // 1. Obtener todas las operaciones activas (manuales y de señales) y las estratégicas pendientes
     const { data: manualTrades, error: manualTradesError } = await supabaseAdmin
       .from('manual_trades')
-      .select('id, user_id, pair, asset_amount, purchase_price, target_price')
-      .eq('status', 'active');
+      .select('id, user_id, pair, usdt_amount, asset_amount, purchase_price, take_profit_percentage, target_price, status, strategy_type, dip_percentage, lookback_minutes')
+      .in('status', ['active', 'awaiting_dip_signal']); // Incluir el nuevo estado
 
     if (manualTradesError) {
-      console.error(`[${functionName}] Error fetching active manual trades:`, manualTradesError);
-      return new Response(JSON.stringify({ error: 'Error fetching active manual trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      console.error(`[${functionName}] Error fetching active/awaiting manual trades:`, manualTradesError);
+      return new Response(JSON.stringify({ error: 'Error fetching active/awaiting manual trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // 2. Obtener todas las operaciones de señales activas Y las que están esperando señal de compra
@@ -222,19 +222,19 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Error fetching active/awaiting signal trades' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const allActiveTrades = [...(manualTrades || []), ...(signalTrades || [])];
+    const allTrades = [...(manualTrades || []), ...(signalTrades || [])];
 
-    if (!allActiveTrades || allActiveTrades.length === 0) {
+    if (!allTrades || allTrades.length === 0) {
       console.log(`[${functionName}] No active or awaiting trades to monitor. Exiting.`);
       return new Response(JSON.stringify({ message: 'No active or awaiting trades to monitor.' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`[${functionName}] Monitoring ${allActiveTrades.length} active/awaiting trades.`);
+    console.log(`[${functionName}] Monitoring ${allTrades.length} active/awaiting trades.`);
 
-    for (const trade of allActiveTrades) {
+    for (const trade of allTrades) {
       console.log(`[${functionName}] Processing trade ${trade.id} (${trade.pair}), current status: ${trade.status}`);
       try {
-        const tableName = manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades';
+        const tableName = (trade as any).strategy_type ? 'manual_trades' : (manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades');
 
         // Obtener las claves de API del usuario para esta operación
         const { data: keys, error: keysError } = await supabaseAdmin
@@ -254,10 +254,131 @@ serve(async (req) => {
 
         const { api_key, api_secret } = keys;
 
-        if (trade.status === 'awaiting_buy_signal') {
-          // Lógica para operaciones esperando señal de compra
+        if (trade.status === 'awaiting_dip_signal') {
+          // Lógica para operaciones estratégicas esperando un dip
+          console.log(`[${functionName}] Strategic trade ${trade.id} (${trade.pair}) is awaiting DIP signal.`);
+
+          const { data: minutePrices, error: pricesError } = await supabaseAdmin
+            .from('minute_prices')
+            .select('close_price, created_at')
+            .eq('asset', trade.pair)
+            .order('created_at', { ascending: false })
+            .limit(trade.lookback_minutes || 15); // Usar lookback_minutes del trade o un default
+
+          if (pricesError) {
+            console.error(`[${functionName}] Error fetching minute prices for strategic trade ${trade.id}:`, pricesError);
+            await supabaseAdmin
+              .from(tableName)
+              .update({ error_message: `Error al obtener precios por minuto: ${pricesError.message}` })
+              .eq('id', trade.id);
+            continue;
+          }
+
+          let signal = false;
+          let reason = '';
+          let currentPrice = 0;
+
+          if (!minutePrices || minutePrices.length < (trade.lookback_minutes || 15)) {
+            reason = `No hay suficientes datos de precios por minuto (${minutePrices?.length || 0}/${trade.lookback_minutes || 15}) para ${trade.pair}.`;
+            console.warn(`[${functionName}] ${reason}`);
+          } else {
+            const prices = minutePrices.map(p => p.close_price);
+            currentPrice = prices[0]; // El precio más reciente
+            const highPriceInLookback = Math.max(...prices);
+
+            const requiredDip = highPriceInLookback * ((trade.dip_percentage || 0.5) / 100);
+            const priceDrop = highPriceInLookback - currentPrice;
+
+            if (priceDrop >= requiredDip) {
+              if (prices.length > 1 && currentPrice > prices[1]) {
+                signal = true;
+                reason = `Dip del ${trade.dip_percentage}% detectado y rebote confirmado.`;
+              } else {
+                signal = true;
+                reason = `Dip del ${trade.dip_percentage}% detectado.`;
+              }
+            } else {
+              reason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${trade.dip_percentage}%)`;
+            }
+          }
+
+          if (signal) {
+            console.log(`[${functionName}] DIP signal detected for strategic trade ${trade.id} (${trade.pair}). Initiating buy order.`);
+
+            // Obtener información de intercambio para precisión y límites
+            const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${trade.pair}`;
+            const exchangeInfoResponse = await fetch(exchangeInfoUrl);
+            const exchangeInfoData = await exchangeInfoResponse.json();
+
+            if (!exchangeInfoResponse.ok || exchangeInfoData.code) {
+              throw new Error(`Error al obtener información de intercambio: ${exchangeInfoData.msg || 'Error desconocido'}`);
+            }
+
+            const symbolInfo = exchangeInfoData.symbols.find((s: any) => s.symbol === trade.pair);
+            if (!symbolInfo) {
+              throw new Error(`Información de intercambio no encontrada para el símbolo ${trade.pair}`);
+            }
+
+            // Ejecutar la orden de compra en Binance
+            let queryString = `symbol=${trade.pair}&side=BUY&type=MARKET&quoteOrderQty=${trade.usdt_amount}&timestamp=${Date.now()}`;
+            const signature = new HmacSha256(api_secret).update(queryString).toString();
+            const url = `https://api.binance.com/api/v3/order?${queryString}&signature=${signature}`;
+            console.log(`[${functionName}] Sending BUY order for strategic trade ${trade.id} (${trade.pair}) with ${trade.usdt_amount} USDT.`);
+
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: { 'X-MBX-APIKEY': api_key },
+            });
+
+            const orderResult = await response.json();
+            if (!response.ok) {
+              console.error(`[${functionName}] Binance BUY order error for strategic trade ${trade.id} (${trade.pair}): ${orderResult.msg || 'Unknown error'}`, orderResult);
+              await supabaseAdmin
+                .from(tableName)
+                .update({ status: 'error', error_message: `Error de Binance al comprar: ${orderResult.msg || 'Error desconocido'}` })
+                .eq('id', trade.id);
+              continue;
+            }
+            console.log(`[${functionName}] Binance BUY order successful for strategic trade ${trade.id} (${trade.pair}). Order ID: ${orderResult.orderId}`);
+
+            // Calcular precio de compra y precio objetivo
+            const executedQty = parseFloat(orderResult.executedQty);
+            const cummulativeQuoteQty = parseFloat(orderResult.cummulativeQuoteQty);
+            const purchasePrice = cummulativeQuoteQty / executedQty;
+            const targetPrice = (purchasePrice * (1 + trade.take_profit_percentage / 100)) / (1 - BINANCE_FEE_RATE);
+
+            // Actualizar la operación en la DB a 'active'
+            const { error: updateToActiveError } = await supabaseAdmin
+              .from(tableName)
+              .update({
+                status: 'active',
+                asset_amount: executedQty,
+                purchase_price: purchasePrice,
+                target_price: targetPrice,
+                binance_order_id_buy: orderResult.orderId.toString(),
+                error_message: null, // Limpiar el mensaje de error
+                created_at: new Date().toISOString(), // Set creation time when it becomes active
+              })
+              .eq('id', trade.id);
+
+            if (updateToActiveError) {
+              console.error(`[${functionName}] Error updating strategic trade ${trade.id} to 'active' status:`, updateToActiveError);
+              throw new Error(`Error al actualizar la operación estratégica a activa en DB: ${updateToActiveError.message}`);
+            }
+            console.log(`[${functionName}] Strategic trade ${trade.id} activated and buy order placed successfully.`);
+
+          } else {
+            // Si no hay señal, actualizar el mensaje de error en la DB
+            await supabaseAdmin
+              .from(tableName)
+              .update({ error_message: reason })
+              .eq('id', trade.id);
+            console.log(`[${functionName}] Strategic trade ${trade.id} still awaiting DIP signal. Reason: ${reason}`);
+          }
+
+        } else if (trade.status === 'awaiting_buy_signal') {
+          // Lógica para operaciones esperando señal de compra (ML Signals)
           console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal.`);
-          // Usar la función actualizada que obtiene datos de la API de Binance
           const mlSignal = await getMlSignalForAssetFromBinance(trade.pair);
 
           if (mlSignal.signal === 'BUY' && mlSignal.confidence >= 70) {
@@ -291,7 +412,11 @@ serve(async (req) => {
             const orderResult = await response.json();
             if (!response.ok) {
               console.error(`[${functionName}] Binance BUY order error for ${trade.pair}: ${orderResult.msg || 'Unknown error'}`, orderResult);
-              throw new Error(`Error de Binance al comprar: ${orderResult.msg || 'Error desconocido'}`);
+              await supabaseAdmin
+                .from(tableName)
+                .update({ status: 'error', error_message: `Error de Binance al comprar: ${orderResult.msg || 'Error desconocido'}` })
+                .eq('id', trade.id);
+              continue;
             }
             console.log(`[${functionName}] Binance BUY order successful for ${trade.pair}. Order ID: ${orderResult.orderId}`);
 
@@ -391,11 +516,6 @@ serve(async (req) => {
             if (actualFreeBalance > 0) {
                 // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
                 quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
-                
-                // ELIMINADO: La reducción del 0.1% que podía causar que la cantidad se redondeara a cero.
-                // if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
-                //     quantityToSell *= 0.999; // Reduce by 0.1%
-                // }
             }
 
             let binanceSellAttemptedInMonitor = false;
@@ -492,7 +612,7 @@ serve(async (req) => {
         }
       } catch (tradeError: any) {
         console.error(`[${functionName}] Error processing trade ${trade.id}:`, tradeError);
-        const tableName = manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades';
+        const tableName = (trade as any).strategy_type ? 'manual_trades' : (manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades');
         await supabaseAdmin
           .from(tableName)
           .update({ status: 'error', error_message: tradeError.message })
