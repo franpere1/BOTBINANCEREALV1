@@ -15,49 +15,75 @@ interface HourlyPrice {
   timestamp: string;
 }
 
-interface HourlyPriceMonitorProps {
-  signalAssets: string[]; // Nueva prop para los activos de señales
+interface AssetMonitoringStatus {
+  asset: string;
+  latestPrice: HourlyPrice | null;
+  count: number;
+  targetCount: number; // 100 hours
+  deleteThreshold: number; // 150 hours
 }
 
-const fetchLatestHourlyPrices = async (assets: string[]): Promise<HourlyPrice[]> => {
+interface HourlyPriceMonitorProps {
+  signalAssets: string[]; // Prop para los activos de señales
+}
+
+const fetchAssetMonitoringStatus = async (assets: string[]): Promise<AssetMonitoringStatus[]> => {
   if (assets.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('hourly_prices')
-    .select('*')
-    .in('asset', assets) // Filtrar por los activos de señales
-    .order('timestamp', { ascending: false })
-    .limit(assets.length * 2); // Obtener suficientes registros para asegurar el más reciente de cada uno
+  const results: AssetMonitoringStatus[] = [];
+  for (const asset of assets) {
+    // Fetch latest price for the asset
+    const { data: latestPriceData, error: priceError } = await supabase
+      .from('hourly_prices')
+      .select('*')
+      .eq('asset', asset)
+      .order('timestamp', { ascending: false })
+      .limit(1)
+      .single();
 
-  if (error) throw new Error(error.message);
+    // Fetch total count of records for the asset
+    const { count, error: countError } = await supabase
+      .from('hourly_prices')
+      .select('id', { count: 'exact' })
+      .eq('asset', asset);
 
-  // Filtrar para obtener solo el registro más reciente de cada activo
-  const latestPricesMap = new Map<string, HourlyPrice>();
-  data.forEach(price => {
-    if (!latestPricesMap.has(price.asset)) {
-      latestPricesMap.set(price.asset, price);
+    if (priceError && priceError.code !== 'PGRST116') { // PGRST116 means no rows found
+      console.error(`Error fetching latest price for ${asset}:`, priceError);
+      // We can still proceed with count if price fetch failed
     }
-  });
-  return Array.from(latestPricesMap.values());
+    if (countError) {
+      console.error(`Error fetching count for ${asset}:`, countError);
+      // We can still proceed with latest price if count fetch failed
+    }
+
+    results.push({
+      asset,
+      latestPrice: latestPriceData || null,
+      count: count || 0,
+      targetCount: 100,
+      deleteThreshold: 150,
+    });
+  }
+  return results;
 };
 
 const HourlyPriceMonitor = ({ signalAssets }: HourlyPriceMonitorProps) => {
-  const { data: hourlyPrices, isLoading, isError } = useQuery<HourlyPrice[], Error>({
-    queryKey: ['hourlyPrices', signalAssets], // La clave de la query depende de signalAssets
-    queryFn: () => fetchLatestHourlyPrices(signalAssets),
-    enabled: signalAssets.length > 0, // Solo ejecutar la query si hay activos para monitorear
-    refetchInterval: 60000, // Actualizar cada minuto para ver los cambios
+  const { data: assetMonitoringStatus, isLoading, isError } = useQuery<AssetMonitoringStatus[], Error>({
+    queryKey: ['hourlyPricesMonitoring', signalAssets], // Key depends on signalAssets
+    queryFn: () => fetchAssetMonitoringStatus(signalAssets),
+    enabled: signalAssets.length > 0, // Only run query if there are assets to monitor
+    refetchInterval: 60000, // Update every minute
   });
 
   if (isError) {
-    showError("Error al cargar los precios por hora.");
+    showError("Error al cargar el estado de monitoreo de precios por hora.");
     return (
       <Card className="w-full max-w-md mx-auto bg-red-900/50 border-red-700 text-center">
         <CardHeader>
           <CardTitle className="text-red-400 text-2xl">Error de Carga</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-red-300">No se pudieron cargar los precios por hora.</p>
+          <p className="text-red-300">No se pudo cargar el estado de monitoreo de precios por hora.</p>
         </CardContent>
       </Card>
     );
@@ -68,10 +94,10 @@ const HourlyPriceMonitor = ({ signalAssets }: HourlyPriceMonitorProps) => {
       <CardHeader>
         <CardTitle className="text-yellow-400 flex items-center">
           <Clock className="mr-2 h-5 w-5" />
-          Precios por Hora Recolectados (Señales)
+          Monitoreo de Precios por Hora (Señales)
         </CardTitle>
         <CardDescription className="text-gray-400">
-          Últimos precios de activos usados en señales, recolectados automáticamente cada hora.
+          Estado de la recolección de precios para los activos de señales. Se mantienen las últimas 100 horas de datos, eliminando los 50 más antiguos al alcanzar 150.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -82,29 +108,35 @@ const HourlyPriceMonitor = ({ signalAssets }: HourlyPriceMonitorProps) => {
           </div>
         ) : (
           <>
-            {hourlyPrices && hourlyPrices.length > 0 ? (
+            {assetMonitoringStatus && assetMonitoringStatus.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow className="border-gray-700">
                     <TableHead className="text-white">Activo</TableHead>
-                    <TableHead className="text-right text-white">Precio</TableHead>
+                    <TableHead className="text-right text-white">Precios Recolectados</TableHead>
+                    <TableHead className="text-right text-white">Último Precio</TableHead>
                     <TableHead className="text-right text-white">Última Actualización</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {hourlyPrices.map((price) => (
-                    <TableRow key={price.id} className="border-gray-700">
-                      <TableCell className="font-medium text-white">{price.asset}</TableCell>
-                      <TableCell className="text-right text-gray-300">{price.price.toFixed(4)}</TableCell>
+                  {assetMonitoringStatus.map((status) => (
+                    <TableRow key={status.asset} className="border-gray-700">
+                      <TableCell className="font-medium text-white">{status.asset}</TableCell>
                       <TableCell className="text-right text-gray-300">
-                        {new Date(price.timestamp).toLocaleString()}
+                        {status.count} de {status.targetCount} horas
+                      </TableCell>
+                      <TableCell className="text-right text-gray-300">
+                        {status.latestPrice ? status.latestPrice.price.toFixed(4) : 'N/A'}
+                      </TableCell>
+                      <TableCell className="text-right text-gray-300">
+                        {status.latestPrice ? new Date(status.latestPrice.timestamp).toLocaleString() : 'N/A'}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-center text-gray-400">No hay datos de precios por hora para los activos de señales aún.</p>
+              <p className="text-center text-gray-400">No hay activos de señales para monitorear o no se han recolectado datos aún.</p>
             )}
           </>
         )}
