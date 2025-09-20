@@ -1,29 +1,146 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { DollarSign } from 'lucide-react';
+import { DollarSign, RefreshCcw } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { Skeleton } from '@/components/ui/skeleton';
+import { showError } from '@/utils/toast';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+
+const topPairs = [
+  'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
+  'DOGEUSDT', 'ADAUSDT', 'SHIBUSDT', 'AVAXUSDT', 'DOTUSDT', 'TRXUSDT'
+];
+
+interface OrderBook {
+  lastUpdateId: number;
+  bids: [string, string][]; // [price, quantity]
+  asks: [string, string][]; // [price, quantity]
+}
+
+const fetchOrderBook = async (symbol: string): Promise<OrderBook> => {
+  if (!symbol) return { lastUpdateId: 0, bids: [], asks: [] };
+  const { data, error } = await supabase.functions.invoke('get-order-book', {
+    body: { symbol, limit: 10 }, // Fetch top 10 bids/asks
+  });
+  if (error) throw new Error(data?.error || error.message);
+  return data;
+};
 
 const StrategicPurchases = () => {
+  const [selectedPair, setSelectedPair] = useState<string>('BTCUSDT');
+
+  const { data: orderBook, isLoading, isError, refetch } = useQuery<OrderBook, Error>({
+    queryKey: ['orderBook', selectedPair],
+    queryFn: () => fetchOrderBook(selectedPair),
+    enabled: !!selectedPair,
+    refetchInterval: 5000, // Refresh every 5 seconds
+  });
+
+  if (isError) {
+    showError(`Error al cargar el libro de órdenes para ${selectedPair}.`);
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] p-4">
-      <Card className="w-full max-w-2xl bg-gray-800 border-gray-700 text-white text-center">
+    <div className="space-y-8">
+      <Card className="bg-gray-800 border-gray-700">
         <CardHeader>
-          <CardTitle className="text-yellow-400 text-3xl flex items-center justify-center">
-            <DollarSign className="h-8 w-8 mr-3" />
+          <CardTitle className="text-yellow-400 text-2xl flex items-center">
+            <DollarSign className="h-6 w-6 mr-2" />
             Compras Estratégicas
           </CardTitle>
-          <CardDescription className="text-gray-400 mt-2 text-lg">
-            Esta sección está en desarrollo. Aquí podrás configurar y monitorear tus estrategias de compra automatizadas.
+          <CardDescription className="text-gray-400">
+            Monitorea la profundidad del mercado para identificar oportunidades de compra.
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-6">
-          <p className="text-gray-300 text-base">
-            Próximamente: Análisis de microtendencias, modelo predictivo de IA, stop loss y take profit dinámicos, y un dashboard completo para maximizar tus ganancias en USDT.
-          </p>
-          <p className="text-gray-500 text-sm mt-4">
-            ¡Mantente atento a las actualizaciones!
-          </p>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row items-center gap-4 mb-6">
+            <div className="flex-1 w-full">
+              <Label htmlFor="pair-select" className="text-gray-300">Selecciona un Par</Label>
+              <Select onValueChange={setSelectedPair} defaultValue={selectedPair}>
+                <SelectTrigger id="pair-select" className="w-full bg-gray-700 border-gray-600 text-white">
+                  <SelectValue placeholder="Selecciona un par" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-700 border-gray-600 text-white">
+                  {topPairs.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={() => refetch()} disabled={isLoading} className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold mt-auto">
+              <RefreshCcw className="mr-2 h-4 w-4" />
+              {isLoading ? 'Cargando...' : 'Actualizar'}
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Skeleton className="h-64 w-full" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card className="bg-gray-700 border-gray-600">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-green-400 text-xl">Ofertas de Compra (Bids)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-gray-600">
+                        <TableHead className="text-white">Precio</TableHead>
+                        <TableHead className="text-right text-white">Cantidad</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {orderBook?.bids.length > 0 ? (
+                        orderBook.bids.map(([price, quantity], index) => (
+                          <TableRow key={index} className="border-gray-700">
+                            <TableCell className="text-green-300">{parseFloat(price).toFixed(4)}</TableCell>
+                            <TableCell className="text-right text-gray-300">{parseFloat(quantity).toFixed(4)}</TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow><TableCell colSpan={2} className="text-center text-gray-400">No hay ofertas de compra.</TableCell></TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gray-700 border-gray-600">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-red-400 text-xl">Ofertas de Venta (Asks)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-gray-600">
+                        <TableHead className="text-white">Precio</TableHead>
+                        <TableHead className="text-right text-white">Cantidad</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {orderBook?.asks.length > 0 ? (
+                        orderBook.asks.map(([price, quantity], index) => (
+                          <TableRow key={index} className="border-gray-700">
+                            <TableCell className="text-red-300">{parseFloat(price).toFixed(4)}</TableCell>
+                            <TableCell className="text-right text-gray-300">{parseFloat(quantity).toFixed(4)}</TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow><TableCell colSpan={2} className="text-center text-gray-400">No hay ofertas de venta.</TableCell></TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
