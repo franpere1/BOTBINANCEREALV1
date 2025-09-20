@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { showError } from '@/utils/toast';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import MinutePriceMonitor from '@/components/MinutePriceMonitor'; // Importar el nuevo componente
 
 const topPairs = [
   'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
@@ -143,6 +144,8 @@ const StrategicPurchases = () => {
           )}
         </CardContent>
       </Card>
+
+      <MinutePriceMonitor strategicAssets={topPairs} />
     </div>
   );
 };
