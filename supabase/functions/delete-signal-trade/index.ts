@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
 
 const corsHeaders = {
@@ -61,7 +61,7 @@ serve(async (req) => {
     let binanceSellAttempted = false;
     let binanceErrorMessage: string | null = null;
 
-    // 2. Si la operación está activa, intentar vender los activos
+    // 2. Si la operación está activa y tiene una cantidad de activo, intentar vender los activos
     if (trade.status === 'active' && trade.asset_amount && trade.asset_amount > 0) {
       binanceSellAttempted = true;
       const baseAsset = trade.pair.replace('USDT', '');
@@ -92,11 +92,11 @@ serve(async (req) => {
         const stepSize = parseFloat(quantityFilter.stepSize);
         const minQty = parseFloat(quantityFilter.minQty);
 
-        // Obtener el balance actual del activo
+        // Obtener el balance actual del activo del usuario en Binance
         const timestamp = Date.now();
         const accountQueryString = `timestamp=${timestamp}`;
         const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
-        const accountUrl = `https://api.binance.com/api/v3/account?${queryStringAccount}&signature=${signatureAccount}`;
+        const accountUrl = `https://api.binance.com/api/v3/account?${accountQueryString}&signature=${accountSignature}`;
 
         const accountResponse = await fetch(accountUrl, {
           method: 'GET',
@@ -109,13 +109,21 @@ serve(async (req) => {
         }
 
         const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
+        const actualFreeBalance = assetBalance ? parseFloat(assetBalance.free) : 0;
         
-        if (!assetBalance || parseFloat(assetBalance.free) === 0) {
-          console.warn(`[DELETE-TRADE] No hay saldo disponible de ${baseAsset} para vender al eliminar la operación ${tradeId}.`);
-          binanceErrorMessage = `No hay saldo disponible de ${baseAsset} para vender.`;
-        } else {
-          let finalQuantity = parseFloat(assetBalance.free);
+        let quantityToSell = trade.asset_amount; // Cantidad deseada a vender (la que se compró para este trade)
 
+        if (actualFreeBalance === 0) {
+          binanceErrorMessage = `No hay saldo disponible de ${baseAsset} en Binance para vender al eliminar la operación ${tradeId}.`;
+          console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
+        } else if (quantityToSell > actualFreeBalance) {
+          // Si la cantidad registrada en el trade es mayor que el saldo libre, vender el máximo disponible
+          binanceErrorMessage = `Saldo insuficiente de ${baseAsset} en Binance. Se intentará vender el máximo disponible (${actualFreeBalance.toFixed(8)}) al eliminar la operación ${tradeId}.`;
+          console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
+          quantityToSell = actualFreeBalance;
+        }
+
+        if (quantityToSell > 0) { // Solo proceder con la orden de venta si hay algo que vender
           // Obtener el precio actual para verificar MIN_NOTIONAL en ventas
           const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${trade.pair}`;
           const tickerPriceResponse = await fetch(tickerPriceUrl);
@@ -125,16 +133,16 @@ serve(async (req) => {
           }
           const currentPrice = parseFloat(tickerPriceData.price);
 
-          let adjustedQuantity = adjustQuantity(finalQuantity, stepSize);
+          let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
 
           if (adjustedQuantity < minQty) {
             console.warn(`[DELETE-TRADE] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`);
-            binanceErrorMessage = `Cantidad de venta (${adjustedQuantity}) menor que la mínima (${minQty}). No se realizó la venta.`;
+            binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Cantidad de venta (${adjustedQuantity}) menor que la mínima (${minQty}). No se realizó la venta.`;
           } else {
             const notionalValue = adjustedQuantity * currentPrice;
             if (notionalValue < minNotional) {
               console.warn(`[DELETE-TRADE] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta.`);
-              binanceErrorMessage = `Valor nocional de venta (${notionalValue.toFixed(8)}) menor que el mínimo (${minNotional}). No se realizó la venta.`;
+              binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Valor nocional de venta (${notionalValue.toFixed(8)}) menor que el mínimo (${minNotional}). No se realizó la venta.`;
             } else {
               // Ejecutar la orden de venta en Binance
               const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
@@ -149,7 +157,7 @@ serve(async (req) => {
               const sellOrderData = await sellResponse.json();
 
               if (!sellResponse.ok) {
-                binanceErrorMessage = `Error de Binance al vender activos para eliminar la operación: ${sellOrderData.msg || 'Error desconocido'}`;
+                binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error de Binance al vender activos para eliminar la operación: ${sellOrderData.msg || 'Error desconocido'}`;
                 console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
               } else {
                 console.log(`[DELETE-TRADE] Activos de la operación ${tradeId} vendidos en Binance.`);
@@ -158,14 +166,14 @@ serve(async (req) => {
           }
         }
       } catch (sellAttemptError: any) {
-        binanceErrorMessage = `Error durante el intento de venta en Binance para eliminación: ${sellAttemptError.message}`;
+        binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance para eliminación: ${sellAttemptError.message}`;
         console.warn(`[DELETE-TRADE] ${binanceErrorMessage}`);
       }
     } else if (trade.status === 'awaiting_buy_signal') {
       console.log(`[DELETE-TRADE] Trade ${tradeId} está esperando una señal de compra. No hay activos para vender.`);
     }
 
-    // 3. Eliminar el registro de la base de datos
+    // 3. Siempre eliminar el registro de la base de datos
     const { error: deleteError } = await supabaseAdmin
       .from('signal_trades')
       .delete()
