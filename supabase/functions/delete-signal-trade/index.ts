@@ -68,6 +68,7 @@ serve(async (req) => {
 
     let binanceSellAttempted = false;
     let binanceErrorMessage: string | null = null;
+    let shouldAttemptBinanceSell = true; // Bandera para controlar la llamada a la API de Binance
 
     // 2. Si la operación está activa y tiene una cantidad de activo, intentar vender los activos
     if (trade.status === 'active' && trade.asset_amount && trade.asset_amount > 0) {
@@ -136,6 +137,7 @@ serve(async (req) => {
         if (quantityToSell === 0) {
           binanceErrorMessage = `No hay saldo disponible de ${baseAsset} en Binance para vender o la cantidad es demasiado pequeña para ${trade.pair}.`;
           console.warn(`[${functionName}] ${binanceErrorMessage}`);
+          shouldAttemptBinanceSell = false;
         } else {
           // Obtener el precio actual para verificar MIN_NOTIONAL en ventas
           const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${trade.pair}`;
@@ -151,39 +153,52 @@ serve(async (req) => {
           if (adjustedQuantity < minQty) {
             console.warn(`[${functionName}] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`);
             binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Cantidad de venta (${adjustedQuantity}) menor que la mínima (${minQty}). No se realizó la venta.`;
+            shouldAttemptBinanceSell = false;
           } else {
             const notionalValue = adjustedQuantity * currentPrice;
             if (notionalValue < minNotional) {
               console.warn(`[${functionName}] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta.`);
               binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Valor nocional de venta (${notionalValue.toFixed(8)}) menor que el mínimo (${minNotional}). No se realizó la venta.`;
-            } else {
-              // Ejecutar la orden de venta en Binance
-              const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
-              const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
-              const sellUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
-
-              const sellResponse = await fetch(sellUrl, {
-                method: 'POST',
-                headers: { 'X-MBX-APIKEY': api_key },
-              });
-
-              const sellOrderData = await sellResponse.json();
-
-              if (!sellResponse.ok) {
-                binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error de Binance al vender activos para eliminar la operación: ${sellOrderData.msg || 'Error desconocido'}`;
-                console.warn(`[${functionName}] ${binanceErrorMessage}`);
-              } else {
-                console.log(`[${functionName}] Activos de la operación ${tradeId} vendidos en Binance.`);
-              }
+              shouldAttemptBinanceSell = false;
             }
           }
         }
       } catch (sellAttemptError: any) {
         binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance para eliminación: ${sellAttemptError.message}`;
         console.warn(`[${functionName}] ${binanceErrorMessage}`);
+        shouldAttemptBinanceSell = false; // Si hay un error en la preparación, no intentar la venta
       }
     } else if (trade.status === 'awaiting_buy_signal') {
       console.log(`[${functionName}] Trade ${tradeId} está esperando una señal de compra. No hay activos para vender.`);
+      shouldAttemptBinanceSell = false; // No hay activos para vender
+    }
+
+    if (shouldAttemptBinanceSell) {
+        try {
+            // Ejecutar la orden de venta en Binance
+            const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
+            const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
+            const sellUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
+
+            const sellResponse = await fetch(sellUrl, {
+                method: 'POST',
+                headers: { 'X-MBX-APIKEY': api_key },
+            });
+
+            const sellOrderData = await sellResponse.json();
+
+            if (!sellResponse.ok) {
+                binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error de Binance al vender activos para eliminar la operación: ${sellOrderData.msg || 'Error desconocido'}`;
+                console.warn(`[${functionName}] ${binanceErrorMessage}`);
+            } else {
+                console.log(`[${functionName}] Activos de la operación ${tradeId} vendidos en Binance.`);
+            }
+        } catch (sellAttemptError: any) {
+            binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance para eliminación: ${sellAttemptError.message}`;
+            console.warn(`[${functionName}] ${binanceErrorMessage}`);
+        }
+    } else {
+        console.log(`[${functionName}] Skipping Binance sell order for trade ${tradeId} due to validation failure or no assets to sell.`);
     }
 
     // 3. Siempre eliminar el registro de la base de datos

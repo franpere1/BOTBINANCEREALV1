@@ -400,56 +400,56 @@ serve(async (req) => {
                 }
             }
 
+            let binanceSellAttemptedInMonitor = false;
+            let binanceErrorMessageInMonitor: string | null = null;
+            let shouldAttemptBinanceSellInMonitor = true;
+
             if (quantityToSell === 0) {
-              console.warn(`[${functionName}] No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña para ${trade.pair}. Marking as error.`);
-              // Marcar como error si no hay activos para vender cuando debería haberlos
-              await supabaseAdmin
-                .from(tableName)
-                .update({ status: 'error', error_message: `No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña.` })
-                .eq('id', trade.id);
-              continue;
+              binanceErrorMessageInMonitor = `No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña para ${trade.pair}.`;
+              console.warn(`[${functionName}] ${binanceErrorMessageInMonitor}`);
+              shouldAttemptBinanceSellInMonitor = false;
+            } else {
+              let adjustedQuantity = adjustQuantity(quantityToSell, stepSize);
+              console.log(`[${functionName}] Calculated quantity to sell for ${trade.pair}: ${quantityToSell}, Adjusted: ${adjustedQuantity}`);
+
+              if (adjustedQuantity < minQty) {
+                binanceErrorMessageInMonitor = `La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta.`;
+                console.warn(`[${functionName}] ${binanceErrorMessageInMonitor}`);
+                shouldAttemptBinanceSellInMonitor = false;
+              } else {
+                const notionalValue = adjustedQuantity * currentPrice;
+                if (notionalValue < minNotional) {
+                  binanceErrorMessageInMonitor = `El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta.`;
+                  console.warn(`[${functionName}] ${binanceErrorMessageInMonitor}`);
+                  shouldAttemptBinanceSellInMonitor = false;
+                }
+              }
             }
 
-            let adjustedQuantity = adjustQuantity(quantityToSell, stepSize); // Usar 0 como fallback si quantityToSell es undefined/null
-            console.log(`[${functionName}] Calculated quantity to sell for ${trade.pair}: ${quantityToSell}, Adjusted: ${adjustedQuantity}`);
+            if (shouldAttemptBinanceSellInMonitor) {
+              binanceSellAttemptedInMonitor = true;
+              const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
+              const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
+              const orderUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
+              console.log(`[${functionName}] Sending SELL order for ${trade.pair} with quantity ${adjustedQuantity}.`);
 
-            if (adjustedQuantity < minQty) {
-              console.warn(`[${functionName}] La cantidad ajustada (${adjustedQuantity}) es menor que la cantidad mínima (${minQty}) para ${trade.pair}. No se realizará la venta. Marking as error.`);
-              await supabaseAdmin
-                .from(tableName)
-                .update({ status: 'error', error_message: `Cantidad de venta (${adjustedQuantity}) menor que la mínima (${minQty}).` })
-                .eq('id', trade.id);
-              continue;
+              const orderResponse = await fetch(orderUrl, {
+                method: 'POST',
+                headers: { 'X-MBX-APIKEY': api_key },
+              });
+
+              const orderData = await orderResponse.json();
+
+              if (!orderResponse.ok) {
+                console.error(`[${functionName}] Binance SELL order error for ${trade.pair}: ${orderData.msg || 'Unknown error'}`, orderData);
+                binanceErrorMessageInMonitor = `Binance sell order error: ${orderData.msg || 'Unknown error'}`;
+              } else {
+                console.log(`[${functionName}] Binance SELL order successful for ${trade.pair}. Order ID: ${orderData.orderId}`);
+                binanceSellOrderId = orderData.orderId.toString();
+              }
+            } else {
+              console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
             }
-
-            const notionalValue = adjustedQuantity * currentPrice;
-            if (notionalValue < minNotional) {
-              console.warn(`[${functionName}] El valor nocional de la orden de venta (${notionalValue.toFixed(8)}) es menor que el mínimo nocional (${minNotional}) para ${trade.pair}. No se realizará la venta. Marking as error.`);
-              await supabaseAdmin
-                .from(tableName)
-                .update({ status: 'error', error_message: `Valor nocional de venta (${notionalValue.toFixed(8)}) menor que el mínimo (${minNotional}).` })
-                .eq('id', trade.id);
-              continue;
-            }
-
-            const sellQueryString = `symbol=${trade.pair}&side=SELL&type=MARKET&quantity=${adjustedQuantity}&timestamp=${Date.now()}`;
-            const sellSignature = new HmacSha256(api_secret).update(sellQueryString).toString();
-            const orderUrl = `https://api.binance.com/api/v3/order?${sellQueryString}&signature=${sellSignature}`;
-            console.log(`[${functionName}] Sending SELL order for ${trade.pair} with quantity ${adjustedQuantity}.`);
-
-            const orderResponse = await fetch(orderUrl, {
-              method: 'POST',
-              headers: { 'X-MBX-APIKEY': api_key },
-            });
-
-            const orderData = await orderResponse.json();
-
-            if (!orderResponse.ok) {
-              console.error(`[${functionName}] Binance SELL order error for ${trade.pair}: ${orderData.msg || 'Unknown error'}`, orderData);
-              throw new Error(`Binance sell order error: ${orderData.msg || 'Unknown error'}`);
-            }
-            console.log(`[${functionName}] Binance SELL order successful for ${trade.pair}. Order ID: ${orderData.orderId}`);
-
 
             // Si la operación es manual, se marca como completada y no se reinicia.
             // Si es de señal, se reinicia para el siguiente ciclo de monitoreo.
@@ -458,8 +458,9 @@ serve(async (req) => {
                 .from(tableName)
                 .update({
                   status: 'completed',
-                  binance_order_id_sell: orderData.orderId.toString(),
+                  binance_order_id_sell: binanceSellOrderId,
                   completed_at: new Date().toISOString(),
+                  error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
                 })
                 .eq('id', trade.id);
               if (updateManualError) {
@@ -472,13 +473,13 @@ serve(async (req) => {
                 .from(tableName)
                 .update({
                   status: 'awaiting_buy_signal', // Reiniciar para monitoreo recurrente
-                  binance_order_id_sell: orderData.orderId.toString(),
+                  binance_order_id_sell: binanceSellOrderId,
                   completed_at: new Date().toISOString(), // Mantener el registro de cuándo se completó el ciclo
                   asset_amount: null,
                   purchase_price: null,
                   target_price: null,
                   binance_order_id_buy: null,
-                  error_message: null,
+                  error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
                   // created_at se mantiene para saber cuándo se inició el monitoreo original
                 })
                 .eq('id', trade.id);
