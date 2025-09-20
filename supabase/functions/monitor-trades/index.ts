@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
 
 const corsHeaders = {
@@ -274,13 +274,13 @@ serve(async (req) => {
             continue;
           }
 
-          let signal = false;
-          let reason = '';
+          let dipSignal = false;
+          let dipReason = '';
           let currentPrice = 0;
 
           if (!minutePrices || minutePrices.length < (trade.lookback_minutes || 15)) {
-            reason = `No hay suficientes datos de precios por minuto (${minutePrices?.length || 0}/${trade.lookback_minutes || 15}) para ${trade.pair}.`;
-            console.warn(`[${functionName}] ${reason}`);
+            dipReason = `No hay suficientes datos de precios por minuto (${minutePrices?.length || 0}/${trade.lookback_minutes || 15}) para ${trade.pair}.`;
+            console.warn(`[${functionName}] ${dipReason}`);
           } else {
             const prices = minutePrices.map(p => p.close_price);
             currentPrice = prices[0]; // El precio más reciente
@@ -291,19 +291,67 @@ serve(async (req) => {
 
             if (priceDrop >= requiredDip) {
               if (prices.length > 1 && currentPrice > prices[1]) {
-                signal = true;
-                reason = `Dip del ${trade.dip_percentage}% detectado y rebote confirmado.`;
+                dipSignal = true;
+                dipReason = `Dip del ${trade.dip_percentage}% detectado y rebote confirmado.`;
               } else {
-                signal = true;
-                reason = `Dip del ${trade.dip_percentage}% detectado.`;
+                dipSignal = true;
+                dipReason = `Dip del ${trade.dip_percentage}% detectado.`;
               }
             } else {
-              reason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${trade.dip_percentage}%)`;
+              dipReason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${trade.dip_percentage}%)`;
             }
           }
 
-          if (signal) {
-            console.log(`[${functionName}] DIP signal detected for strategic trade ${trade.id} (${trade.pair}). Initiating buy order.`);
+          let orderBookConfirmsBuySupport = false;
+          let orderBookReason = '';
+
+          if (dipSignal && currentPrice > 0) { // Solo verificar el libro de órdenes si hay señal de dip y precio actual
+            try {
+              const { data: orderBookData, error: orderBookError } = await supabaseAdmin.functions.invoke('get-order-book', {
+                body: { symbol: trade.pair, limit: 5 }, // Obtener las 5 mejores ofertas de compra/venta
+              });
+
+              if (orderBookError) {
+                console.warn(`[${functionName}] Error fetching order book for ${trade.pair}: ${orderBookError.message}. Proceeding without order book confirmation.`);
+                orderBookReason = `Error al obtener el libro de órdenes: ${orderBookError.message}`;
+                orderBookConfirmsBuySupport = true; // No bloquear la operación si falla la obtención del libro de órdenes
+              } else {
+                const bids = orderBookData.bids;
+                let totalBidQuantity = 0;
+                for (const [priceStr, quantityStr] of bids) {
+                  const bidPrice = parseFloat(priceStr);
+                  const bidQuantity = parseFloat(quantityStr);
+                  // Considerar ofertas de compra (bids) en o muy cerca del precio actual (ej. dentro del 0.1% por debajo)
+                  if (bidPrice >= currentPrice * 0.999) { 
+                    totalBidQuantity += bidQuantity;
+                  }
+                }
+
+                // Heurística: la cantidad total de ofertas de compra debe ser al menos 5 veces la cantidad de activo que se compraría
+                const estimatedAssetAmount = trade.usdt_amount / currentPrice;
+                const requiredBidQuantity = estimatedAssetAmount * 5; // Umbral de ejemplo
+
+                if (totalBidQuantity >= requiredBidQuantity) {
+                  orderBookConfirmsBuySupport = true;
+                  orderBookReason = `Fuerte soporte de compra detectado en el libro de órdenes (total bids: ${totalBidQuantity.toFixed(4)}, requerido: ${requiredBidQuantity.toFixed(4)}).`;
+                } else {
+                  orderBookReason = `Soporte de compra insuficiente en el libro de órdenes (total bids: ${totalBidQuantity.toFixed(4)}, requerido: ${requiredBidQuantity.toFixed(4)}).`;
+                }
+                console.log(`[${functionName}] Verificación del Libro de Órdenes para ${trade.pair}: ${orderBookReason}`);
+              }
+            } catch (obError: any) {
+              console.error(`[${functionName}] Error inesperado durante la verificación del libro de órdenes para ${trade.pair}:`, obError);
+              orderBookReason = `Error inesperado al verificar el libro de órdenes: ${obError.message}`;
+              orderBookConfirmsBuySupport = true; // No bloquear si la verificación falla inesperadamente
+            }
+          } else if (!dipSignal) {
+            orderBookReason = "No se verificó el libro de órdenes porque no se detectó un dip.";
+          } else { // dipSignal is true, but currentPrice is 0 (shouldn't happen if minutePrices is valid)
+            orderBookReason = "No se pudo obtener el precio actual para verificar el libro de órdenes.";
+          }
+
+          if (dipSignal && orderBookConfirmsBuySupport) {
+            console.log(`[${functionName}] DIP signal AND Order Book support detected for strategic trade ${trade.id} (${trade.pair}). Initiating buy order.`);
 
             // Obtener información de intercambio para precisión y límites
             const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${trade.pair}`;
@@ -369,11 +417,12 @@ serve(async (req) => {
 
           } else {
             // Si no hay señal, actualizar el mensaje de error en la DB
+            const finalReason = `No se ejecutó la compra. Razón del dip: ${dipReason}. Razón del libro de órdenes: ${orderBookReason}.`;
             await supabaseAdmin
               .from(tableName)
-              .update({ error_message: reason })
+              .update({ error_message: finalReason })
               .eq('id', trade.id);
-            console.log(`[${functionName}] Strategic trade ${trade.id} still awaiting DIP signal. Reason: ${reason}`);
+            console.log(`[${functionName}] Strategic trade ${trade.id} still awaiting DIP signal. Reason: ${finalReason}`);
           }
 
         } else if (trade.status === 'awaiting_buy_signal') {
