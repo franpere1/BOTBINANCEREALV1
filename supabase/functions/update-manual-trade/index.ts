@@ -74,7 +74,7 @@ serve(async (req) => {
       if (takeProfitPercentage !== undefined) updatePayload.take_profit_percentage = takeProfitPercentage;
       if (dipPercentage !== undefined) updatePayload.dip_percentage = dipPercentage;
       if (lookbackMinutes !== undefined) updatePayload.lookback_minutes = lookbackMinutes;
-      updatePayload.error_message = null; // Limpiar el mensaje de error al editar
+      // NO limpiar el error_message aquí. Se actualizará en el siguiente ciclo de monitor-trades.
       updatePayload.target_price = null; // Asegurarse de que target_price sea null si está esperando dip
     } else if (existingTrade.status === 'active') {
       // Si el trade está activo, solo se puede actualizar takeProfitPercentage y recalcular target_price
