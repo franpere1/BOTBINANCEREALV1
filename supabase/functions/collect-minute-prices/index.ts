@@ -7,8 +7,8 @@ const corsHeaders = {
 };
 
 const ASSETS_TO_MONITOR = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
-const MAX_RECORDS_PER_ASSET = 1500; // Límite superior antes de borrar
-const RECORDS_TO_KEEP = 1000; // Cantidad de registros a mantener después de borrar
+const MAX_RECORDS_PER_ASSET = 6500; // Límite superior antes de borrar (para 100 horas de datos de 1 minuto + buffer)
+const RECORDS_TO_KEEP = 6000; // Cantidad de registros a mantener después de borrar (100 horas * 60 minutos)
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -25,29 +25,41 @@ serve(async (req) => {
 
     for (const asset of ASSETS_TO_MONITOR) {
       try {
-        // 1. Obtener el precio actual del activo desde Binance
-        const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${asset}`;
-        const tickerResponse = await fetch(tickerPriceUrl);
-        const tickerData = await tickerResponse.json();
+        // 1. Obtener la última vela de 1 minuto desde Binance
+        const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1m&limit=1`;
+        const klinesResponse = await fetch(klinesUrl);
+        const klinesData = await klinesResponse.json();
 
-        if (!tickerResponse.ok || tickerData.code) {
-          throw new Error(`Error fetching ticker price for ${asset}: ${tickerData.msg || 'Unknown error'}`);
+        if (!klinesResponse.ok || klinesData.code || klinesData.length === 0) {
+          throw new Error(`Error fetching 1-minute kline for ${asset}: ${klinesData.msg || 'No data'}`);
         }
-        const currentPrice = parseFloat(tickerData.price);
+        
+        const kline = klinesData[0];
+        const openPrice = parseFloat(kline[1]);
+        const highPrice = parseFloat(kline[2]);
+        const lowPrice = parseFloat(kline[3]);
+        const closePrice = parseFloat(kline[4]);
+        const volume = parseFloat(kline[5]);
+        const klineOpenTime = new Date(kline[0]).toISOString(); // Usar el tiempo de apertura de la vela como created_at
 
         // 2. Insertar el nuevo precio en la tabla minute_prices
         const { error: insertError } = await supabaseAdmin
           .from('minute_prices')
           .insert({
             asset: asset,
-            price: currentPrice,
+            open_price: openPrice,
+            high_price: highPrice,
+            low_price: lowPrice,
+            close_price: closePrice,
+            volume: volume,
+            created_at: klineOpenTime, // Almacenar el tiempo de apertura de la vela
           });
 
         if (insertError) {
-          throw new Error(`Error inserting price for ${asset}: ${insertError.message}`);
+          throw new Error(`Error inserting kline data for ${asset}: ${insertError.message}`);
         }
 
-        // 3. Gestionar el límite de registros (1500 max, mantener 1000)
+        // 3. Gestionar el límite de registros
         const { count, error: countError } = await supabaseAdmin
           .from('minute_prices')
           .select('id', { count: 'exact' })
@@ -60,7 +72,6 @@ serve(async (req) => {
         if (count && count > MAX_RECORDS_PER_ASSET) {
           const recordsToDelete = count - RECORDS_TO_KEEP;
           
-          // Obtener los IDs de los registros más antiguos para eliminar
           const { data: oldRecords, error: fetchOldError } = await supabaseAdmin
             .from('minute_prices')
             .select('id')
@@ -85,7 +96,7 @@ serve(async (req) => {
             console.log(`Deleted ${oldRecords.length} old records for ${asset}.`);
           }
         }
-        results.push({ asset, status: 'success', message: `Price collected and managed for ${asset}.` });
+        results.push({ asset, status: 'success', message: `1-minute kline collected and managed for ${asset}.` });
 
       } catch (assetError: any) {
         console.error(`Error processing asset ${asset}:`, assetError);

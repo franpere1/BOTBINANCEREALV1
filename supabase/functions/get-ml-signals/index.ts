@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0'; // Necesario para consultar la tabla minute_prices
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -76,6 +77,51 @@ function calculateRSI(closes: number[], period: number): number {
   return 100 - (100 / (1 + rs));
 }
 
+// Helper function to aggregate 1-minute klines into 1-hour klines
+function aggregateToHourlyKlines(minuteKlines: any[]): any[] {
+  const hourlyKlines: any[] = [];
+  if (minuteKlines.length === 0) return hourlyKlines;
+
+  // Ordenar por created_at ascendente para asegurar el orden correcto de agregación
+  minuteKlines.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  let currentHourlyKline: any = null;
+  let currentHourStartTimestamp = 0; // Timestamp Unix para el inicio de la hora actual
+
+  for (const kline of minuteKlines) {
+    const klineTime = new Date(kline.created_at).getTime();
+    // Calcular el inicio de la hora para la vela actual
+    const hourStart = Math.floor(klineTime / (1000 * 60 * 60)) * (1000 * 60 * 60);
+
+    if (currentHourlyKline === null || hourStart !== currentHourStartTimestamp) {
+      // Si es una nueva hora, añadir la vela horaria anterior (si existe) y empezar una nueva
+      if (currentHourlyKline !== null) {
+        hourlyKlines.push(currentHourlyKline);
+      }
+      currentHourStartTimestamp = hourStart;
+      currentHourlyKline = {
+        open_price: parseFloat(kline.open_price),
+        high_price: parseFloat(kline.high_price),
+        low_price: parseFloat(kline.low_price),
+        close_price: parseFloat(kline.close_price),
+        volume: parseFloat(kline.volume),
+        created_at: new Date(hourStart).toISOString(),
+      };
+    } else {
+      // Si es la misma hora, actualizar máximo, mínimo, cierre y sumar volumen
+      currentHourlyKline.high_price = Math.max(currentHourlyKline.high_price, parseFloat(kline.high_price));
+      currentHourlyKline.low_price = Math.min(currentHourlyKline.low_price, parseFloat(kline.low_price));
+      currentHourlyKline.close_price = parseFloat(kline.close_price); // El cierre del último minuto es el cierre horario
+      currentHourlyKline.volume += parseFloat(kline.volume);
+    }
+  }
+  // Añadir la última vela horaria agregada
+  if (currentHourlyKline !== null) {
+    hourlyKlines.push(currentHourlyKline);
+  }
+  return hourlyKlines;
+}
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -83,11 +129,16 @@ serve(async (req) => {
   }
 
   try {
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
     const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
     const signalsData = [];
 
     for (const asset of assets) {
-      // 1. Get current ticker price
+      // 1. Obtener el precio actual del ticker (todavía de la API de Binance para precio en tiempo real)
       const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${asset}`;
       const tickerResponse = await fetch(tickerPriceUrl);
       const tickerData = await tickerResponse.json();
@@ -97,26 +148,26 @@ serve(async (req) => {
       }
       const currentPrice = parseFloat(tickerData.price);
 
-      // 2. Get historical Klines for indicator calculations
-      // Fetch enough data for MA50 and other indicators (e.g., 100 1-hour candles)
-      const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
-      const klinesResponse = await fetch(klinesUrl);
-      const klinesData = await klinesResponse.json();
+      // 2. Obtener las velas históricas de 1 minuto de la tabla minute_prices
+      // Necesitamos suficientes datos para formar al menos 100 velas de 1 hora, es decir, 6000 registros de 1 minuto
+      const { data: minuteKlines, error: dbError } = await supabaseAdmin
+        .from('minute_prices')
+        .select('open_price, high_price, low_price, close_price, volume, created_at')
+        .eq('asset', asset)
+        .order('created_at', { ascending: false }) // Obtener los más recientes primero
+        .limit(6000); // Obtener suficientes datos de 1 minuto para 100 velas de 1 hora
 
-      if (!klinesResponse.ok || klinesData.code) {
-        console.error(`Error fetching klines for ${asset}:`, klinesData);
-        throw new Error(`Error fetching klines for ${asset}: ${klinesData.msg || 'Unknown error'}`);
+      if (dbError) {
+        console.error(`Error fetching minute prices for ${asset} from DB:`, dbError);
+        throw new Error(`Error fetching minute prices for ${asset}: ${dbError.message}`);
       }
 
-      const closes = klinesData.map((k: any) => parseFloat(k[4])); // Closing prices
-
-      // Ensure we have enough data points
-      if (closes.length < 50) { // Minimum for MA50
-        console.warn(`Not enough klines data for ${asset}. Skipping indicator calculations.`);
+      if (!minuteKlines || minuteKlines.length < 60) { // Necesitamos al menos 60 minutos para una vela horaria completa
+        console.warn(`Not enough minute klines data for ${asset} from DB. Skipping indicator calculations.`);
         signalsData.push({
           asset: asset,
           prediction: asset,
-          signal: 'HOLD', // Default signal
+          signal: 'HOLD', // Señal por defecto
           confidence: 0,
           price: currentPrice,
           rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
@@ -126,17 +177,39 @@ serve(async (req) => {
         continue;
       }
 
-      // Calculate Indicators
+      // 3. Agrupar las velas de 1 minuto en velas de 1 hora
+      const hourlyKlines = aggregateToHourlyKlines(minuteKlines);
+
+      // Asegurarse de tener suficientes puntos de datos horarios agregados (al menos 50 para MA50)
+      if (hourlyKlines.length < 50) {
+        console.warn(`Not enough aggregated hourly klines data for ${asset}. Skipping indicator calculations.`);
+        signalsData.push({
+          asset: asset,
+          prediction: asset,
+          signal: 'HOLD', // Señal por defecto
+          confidence: 0,
+          price: currentPrice,
+          rsi: 0, ma20: 0, ma50: 0, macd: 0, macdSignal: 0, histMacd: 0,
+          upperBand: 0, lowerBand: 0, volatility: 0,
+          lastUpdate: new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        });
+        continue;
+      }
+
+      // Extraer los precios de cierre de las velas horarias agregadas para los cálculos de indicadores
+      const closes = hourlyKlines.map((k: any) => parseFloat(k.close_price));
+
+      // Calcular Indicadores
       const ma20 = calculateSMA(closes, 20);
       const ma50 = calculateSMA(closes, 50);
 
-      const rsi = calculateRSI(closes, 14); // 14-period RSI
+      const rsi = calculateRSI(closes, 14); // RSI de 14 períodos
 
       // MACD
       const ema12Series = calculateEMASeries(closes, 12);
       const ema26Series = calculateEMASeries(closes, 26);
       
-      // Align MACD line calculation to the shorter EMA series
+      // Alinear el cálculo de la línea MACD a la serie EMA más corta
       const macdLineData = ema12Series.slice(ema12Series.length - ema26Series.length).map((e12, i) => e12 - ema26Series[i]);
       const macdSignalLineSeries = calculateEMASeries(macdLineData, 9);
 
@@ -144,72 +217,72 @@ serve(async (req) => {
       const macdSignal = macdSignalLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
       const histMacd = macd - macdSignal;
 
-      // Bollinger Bands (using 20-period SMA and 2 standard deviations)
+      // Bandas de Bollinger (usando SMA de 20 períodos y 2 desviaciones estándar)
       const bbPeriod = 20;
       const bbMiddleBand = calculateSMA(closes, bbPeriod);
       const stdDev = calculateStdDev(closes, bbPeriod);
       const upperBand = bbMiddleBand + (stdDev * 2);
       const lowerBand = bbMiddleBand - (stdDev * 2);
 
-      // Volatility (using standard deviation of recent closing prices)
-      const volatility = (stdDev / currentPrice) * 100; // Percentage volatility
+      // Volatilidad (usando la desviación estándar de los precios de cierre recientes)
+      const volatility = (stdDev / currentPrice) * 100; // Volatilidad en porcentaje
 
-      // --- Dynamic Signal and Confidence Logic ---
+      // --- Lógica Dinámica de Señal y Confianza ---
       let signal: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
       let confidence = 0;
-      let rawScore = 0; // Ranges from -100 (strong sell) to 100 (strong buy)
+      let rawScore = 0; // Rango de -100 (venta fuerte) a 100 (compra fuerte)
 
-      // RSI scoring (more extreme RSI values give higher scores)
-      if (rsi < 30) rawScore += 30; // Very oversold
-      else if (rsi < 40) rawScore += 15; // Moderately oversold
-      else if (rsi > 70) rawScore -= 30; // Very overbought
-      else if (rsi > 60) rawScore -= 15; // Moderately overbought
+      // Puntuación RSI (valores RSI más extremos dan puntuaciones más altas)
+      if (rsi < 30) rawScore += 30; // Muy sobrevendido
+      else if (rsi < 40) rawScore += 15; // Moderadamente sobrevendido
+      else if (rsi > 70) rawScore -= 30; // Muy sobrecomprado
+      else if (rsi > 60) rawScore -= 15; // Moderadamente sobrecomprado
 
-      // MACD scoring (crossover and histogram direction)
-      if (macd > macdSignal && histMacd > 0) rawScore += 25; // Bullish crossover with positive momentum
-      else if (macd < macdSignal && histMacd < 0) rawScore -= 25; // Bearish crossover with negative momentum
+      // Puntuación MACD (cruce y dirección del histograma)
+      if (macd > macdSignal && histMacd > 0) rawScore += 25; // Cruce alcista con impulso positivo
+      else if (macd < macdSignal && histMacd < 0) rawScore -= 25; // Cruce bajista con impulso negativo
 
-      // Price vs MA20
+      // Precio vs MA20
       if (currentPrice > ma20) rawScore += 20;
       else if (currentPrice < ma20) rawScore -= 20;
 
-      // Price vs MA50
+      // Precio vs MA50
       if (currentPrice > ma50) rawScore += 15;
       else if (currentPrice < ma50) rawScore -= 15;
 
-      // Bollinger Bands
-      if (currentPrice < lowerBand) rawScore += 10; // Price below lower band (potential bounce up)
-      else if (currentPrice > upperBand) rawScore -= 10; // Price above upper band (potential pullback)
+      // Bandas de Bollinger
+      if (currentPrice < lowerBand) rawScore += 10; // Precio por debajo de la banda inferior (potencial rebote al alza)
+      else if (currentPrice > upperBand) rawScore -= 10; // Precio por encima de la banda superior (potencial retroceso)
 
-      // Determine signal based on rawScore thresholds
-      if (rawScore >= 20) { // A positive score threshold for BUY
+      // Determinar la señal basándose en los umbrales de rawScore
+      if (rawScore >= 20) { // Umbral de puntuación positiva para COMPRA
         signal = 'BUY';
-      } else if (rawScore <= -20) { // A negative score threshold for SELL
+      } else if (rawScore <= -20) { // Umbral de puntuación negativa para VENTA
         signal = 'SELL';
       } else {
         signal = 'HOLD';
       }
 
-      // Map rawScore to confidence [0-100] based on the determined signal
+      // Mapear rawScore a confianza [0-100] basándose en la señal determinada
       if (signal === 'BUY') {
-        // Scale rawScore from [20, 100] to confidence [50, 100]
-        // Ensure minimum confidence for a BUY signal is 50
+        // Escalar rawScore de [20, 100] a confianza [50, 100]
+        // Asegurar que la confianza mínima para una señal de COMPRA sea 50
         confidence = 50 + Math.max(0, (rawScore - 20) / 80) * 50;
       } else if (signal === 'SELL') {
-        // Scale rawScore from [-100, -20] to confidence [0, 49.9]
-        // Ensure maximum confidence for a SELL signal is 49.9
+        // Escalar rawScore de [-100, -20] a confianza [0, 49.9]
+        // Asegurar que la confianza máxima para una señal de VENTA sea 49.9
         confidence = 49.9 - Math.max(0, (Math.abs(rawScore) - 20) / 80) * 49.9;
       } else { // HOLD
-        // Scale rawScore from [-20, 20] to confidence [40, 60] (centered around 50)
+        // Escalar rawScore de [-20, 20] a confianza [40, 60] (centrado en 50)
         confidence = 50 + (rawScore / 20) * 10;
       }
 
-      // Final capping to ensure confidence is within [0, 100]
+      // Límite final para asegurar que la confianza esté entre [0, 100]
       confidence = Math.max(0, Math.min(100, confidence));
 
       signalsData.push({
         asset: asset,
-        prediction: asset, // Placeholder
+        prediction: asset, // Marcador de posición
         signal: signal,
         confidence: confidence,
         price: currentPrice,

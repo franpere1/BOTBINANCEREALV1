@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Clock, AlertCircle } from 'lucide-react';
 
 const ASSETS_TO_MONITOR = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
+const RECORDS_TO_KEEP = 6000; // Cantidad de registros a mantener después de borrar (100 horas * 60 minutos)
 
 interface MinutePriceCount {
   asset: string;
@@ -85,7 +86,7 @@ const MinutePriceCollectorStatus = () => {
       <CardContent className="text-sm grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2">
         {priceCounts?.map((item) => (
           <p key={item.asset} className="text-gray-400">
-            {item.asset}: <span className="text-white font-semibold">{item.count} / 1000</span>
+            {item.asset}: <span className="text-white font-semibold">{item.count} / {RECORDS_TO_KEEP}</span>
           </p>
         ))}
       </CardContent>
