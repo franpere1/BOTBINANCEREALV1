@@ -48,6 +48,7 @@ serve(async (req) => {
     if (!tradeId || !tradeType) throw new Error('Los parámetros "tradeId" y "tradeType" son obligatorios.');
 
     const tableName = tradeType === 'manual' ? 'manual_trades' : 'signal_trades';
+    console.log(`[CLOSE-TRADE] Processing trade ${tradeId} of type ${tradeType} from table ${tableName}.`);
 
     // 1. Obtener los detalles de la operación
     const { data: trade, error: fetchTradeError } = await supabaseAdmin
@@ -63,7 +64,7 @@ serve(async (req) => {
 
     const { pair } = trade;
     const baseAsset = pair.replace('USDT', '');
-    console.log(`[CLOSE-TRADE] Procesando trade ${tradeId} para el par ${pair}. Base Asset: ${baseAsset}`);
+    console.log(`[CLOSE-TRADE] Trade ${tradeId} for pair ${pair}. Base Asset: ${baseAsset}`);
 
     let binanceSellOrderId: string | null = null;
     let binanceErrorMessage: string | null = null;
@@ -186,21 +187,40 @@ serve(async (req) => {
       console.log(`[CLOSE-TRADE] Trade ${tradeId} no tiene 'asset_amount' o es 0. No se intentó orden de venta.`);
     }
 
-    // 7. Siempre actualizar el estado de la operación en la base de datos a 'completed'
+    // 7. Actualizar el estado de la operación en la base de datos
+    const updatePayload: any = {
+      binance_order_id_sell: binanceSellOrderId,
+      completed_at: new Date().toISOString(),
+      error_message: binanceErrorMessage, // Almacenar cualquier mensaje de error de Binance
+    };
+
+    if (tradeType === 'manual') {
+      updatePayload.status = 'completed';
+      console.log(`[CLOSE-TRADE] Manual trade ${tradeId} updated to 'completed'.`);
+    } else if (tradeType === 'signal') {
+      // Para operaciones de señal, reiniciar a awaiting_buy_signal para recurrencia
+      updatePayload.status = 'awaiting_buy_signal';
+      updatePayload.asset_amount = null;
+      updatePayload.purchase_price = null;
+      updatePayload.target_price = null;
+      updatePayload.binance_order_id_buy = null;
+      console.log(`[CLOSE-TRADE] Signal trade ${tradeId} updated to 'awaiting_buy_signal' for recurrence.`);
+    } else {
+      // Fallback, aunque tradeType siempre debería ser 'manual' o 'signal'
+      updatePayload.status = 'completed';
+      console.warn(`[CLOSE-TRADE] Unknown tradeType '${tradeType}' for trade ${tradeId}. Defaulting to 'completed'.`);
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from(tableName)
-      .update({
-        status: 'completed',
-        binance_order_id_sell: binanceSellOrderId,
-        completed_at: new Date().toISOString(),
-        error_message: binanceErrorMessage, // Almacenar cualquier mensaje de error de Binance
-      })
+      .update(updatePayload)
       .eq('id', tradeId);
 
     if (updateError) {
+      console.error(`[CLOSE-TRADE] Error al actualizar la operación en DB: ${updateError.message}`);
       throw new Error(`Error al actualizar la operación en DB: ${updateError.message}`);
     }
-    console.log(`[CLOSE-TRADE] Trade ${tradeId} completado y actualizado en DB.`);
+    console.log(`[CLOSE-TRADE] Trade ${tradeId} status updated in DB.`);
 
     // Devolver una respuesta exitosa (HTTP 200), con una advertencia si la venta en Binance falló
     if (binanceErrorMessage) {
