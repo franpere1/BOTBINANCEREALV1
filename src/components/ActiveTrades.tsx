@@ -8,8 +8,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
 import { useState } from 'react';
-import { AlertCircle, Trash2 } from 'lucide-react';
+import { AlertCircle, Trash2, Edit } from 'lucide-react'; // Importar Edit
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'; // Importar componentes de Form
+import { Input } from '@/components/ui/input'; // Importar Input
+import { useForm } from 'react-hook-form'; // Importar useForm
+import { zodResolver } from '@hookform/resolvers/zod'; // Importar zodResolver
+import * as z from 'zod'; // Importar zod
 
 interface Trade {
   id: string;
@@ -46,18 +51,65 @@ const fetchTickerPrice = async (pair: string) => {
   return parseFloat(data.price);
 };
 
+// Esquema de validación para el formulario de edición de operaciones estratégicas
+const editStrategicFormSchema = z.object({
+  usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
+  takeProfitPercentage: z.coerce.number().positive("El porcentaje de ganancia debe ser mayor que 0."),
+  dipPercentage: z.coerce.number().min(0.1, "El porcentaje de caída debe ser al menos 0.1%.").max(10, "El porcentaje de caída no puede ser mayor al 10%."),
+  lookbackMinutes: z.coerce.number().min(5, "El período de búsqueda debe ser al menos 5 minutos.").max(60, "El período de búsqueda no puede ser mayor a 60 minutos."),
+});
+
 const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const queryClient = useQueryClient();
   const [isActionLoading, setIsActionLoading] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false); // Estado para el diálogo de edición
   
   const isAwaitingDipSignal = trade.status === 'awaiting_dip_signal';
 
   const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
-    enabled: !isAwaitingDipSignal, // Solo cargar precio si no está esperando señal
+    enabled: !isAawaitingDipSignal, // Solo cargar precio si no está esperando señal
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
+
+  // Inicializar el formulario de edición con los valores actuales del trade
+  const editForm = useForm<z.infer<typeof editStrategicFormSchema>>({
+    resolver: zodResolver(editStrategicFormSchema),
+    defaultValues: {
+      usdtAmount: trade.usdt_amount,
+      takeProfitPercentage: trade.take_profit_percentage,
+      dipPercentage: trade.dip_percentage || 0.5, // Default si es null
+      lookbackMinutes: trade.lookback_minutes || 15, // Default si es null
+    },
+  });
+
+  const handleEditStrategicTrade = async (values: z.infer<typeof editStrategicFormSchema>) => {
+    setIsActionLoading(true);
+    try {
+      const { data, error: functionError } = await supabase.functions.invoke('update-manual-trade', {
+        body: {
+          tradeId: trade.id,
+          usdtAmount: values.usdtAmount,
+          takeProfitPercentage: values.takeProfitPercentage,
+          dipPercentage: values.dipPercentage,
+          lookbackMinutes: values.lookbackMinutes,
+        },
+      });
+
+      if (functionError) throw functionError;
+      if (data.error) throw new Error(data.error);
+
+      showSuccess(`Estrategia para ${trade.pair} actualizada con éxito.`);
+      queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
+      setIsEditDialogOpen(false); // Cerrar el diálogo después de guardar
+    } catch (error: any) {
+      showError(`Error al actualizar la estrategia para ${trade.pair}: ${error.message}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
 
   const handleCloseOrDeleteTrade = async () => {
     setIsActionLoading(true);
@@ -136,7 +188,88 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
           </>
         ) : 'N/A'}
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="text-right flex items-center justify-end space-x-2">
+        {isAwaitingDipSignal && (
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
+                <Edit className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
+              <DialogHeader>
+                <DialogTitle className="text-yellow-400">Editar Estrategia de {trade.pair}</DialogTitle>
+                <DialogDescription className="text-gray-400">
+                  Actualiza los parámetros de tu estrategia de compra en dip.
+                </DialogDescription>
+              </DialogHeader>
+              <Form {...editForm}>
+                <form onSubmit={editForm.handleSubmit(handleEditStrategicTrade)} className="grid gap-4 py-4">
+                  <FormField
+                    control={editForm.control}
+                    name="usdtAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Cantidad (USDT)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.01" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="takeProfitPercentage"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Ganancia Objetivo (%)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.1" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="dipPercentage"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Caída a Buscar (%)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.1" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="lookbackMinutes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-300">Período de Búsqueda (min)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="1" {...field} className="bg-gray-700 border-gray-600 text-white" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <DialogFooter className="mt-4">
+                    <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={isActionLoading} className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
+                      {isActionLoading ? 'Guardando...' : 'Guardar Cambios'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </DialogContent>
+          </Dialog>
+        )}
         <Dialog>
           <DialogTrigger asChild>
             <Button 
