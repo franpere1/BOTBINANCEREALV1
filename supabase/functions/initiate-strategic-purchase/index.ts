@@ -68,52 +68,70 @@ serve(async (req) => {
       throw new Error(`Error al obtener precios por minuto: ${pricesError.message}`);
     }
 
-    if (!minutePrices || minutePrices.length < lookbackMinutes) {
-      const message = `No hay suficientes datos de precios por minuto (${minutePrices?.length || 0}/${lookbackMinutes}) para ${pair}. Inténtalo de nuevo más tarde.`;
-      console.warn(`[${functionName}] ${message}`);
-      return new Response(JSON.stringify({ message, error: message }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200, // No es un error de servidor, sino una condición de la estrategia
-      });
-    }
-
-    const prices = minutePrices.map(p => p.close_price);
-    const currentPrice = prices[0]; // El precio más reciente
-    const highPriceInLookback = Math.max(...prices);
-
-    console.log(`[${functionName}] Precios en los últimos ${lookbackMinutes} min:`, prices.map(p => p.toFixed(4)));
-    console.log(`[${functionName}] Precio actual: ${currentPrice.toFixed(4)}, Precio máximo en lookback: ${highPriceInLookback.toFixed(4)}`);
-
-    // 2. Aplicar la lógica de "Compra en Dip"
-    const requiredDip = highPriceInLookback * (dipPercentage / 100);
-    const priceDrop = highPriceInLookback - currentPrice;
-
     let signal = false;
     let reason = '';
+    let currentPrice = 0;
 
-    if (priceDrop >= requiredDip) {
-      // Opcional: Confirmación de rebote (precio actual > precio de cierre anterior)
-      if (prices.length > 1 && currentPrice > prices[1]) {
-        signal = true;
-        reason = `Dip del ${dipPercentage}% detectado y rebote confirmado.`;
-      } else {
-        signal = true; // Considerar señal incluso sin rebote inmediato si el dip es significativo
-        reason = `Dip del ${dipPercentage}% detectado.`;
-      }
+    if (!minutePrices || minutePrices.length < lookbackMinutes) {
+      reason = `No hay suficientes datos de precios por minuto (${minutePrices?.length || 0}/${lookbackMinutes}) para ${pair}. La operación se registrará como pendiente.`;
+      console.warn(`[${functionName}] ${reason}`);
+      // No hay señal, pero no es un error fatal, se registrará como pendiente.
     } else {
-      reason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${dipPercentage}%)`;
+      const prices = minutePrices.map(p => p.close_price);
+      currentPrice = prices[0]; // El precio más reciente
+      const highPriceInLookback = Math.max(...prices);
+
+      console.log(`[${functionName}] Precios en los últimos ${lookbackMinutes} min:`, prices.map(p => p.toFixed(4)));
+      console.log(`[${functionName}] Precio actual: ${currentPrice.toFixed(4)}, Precio máximo en lookback: ${highPriceInLookback.toFixed(4)}`);
+
+      // 2. Aplicar la lógica de "Compra en Dip"
+      const requiredDip = highPriceInLookback * (dipPercentage / 100);
+      const priceDrop = highPriceInLookback - currentPrice;
+
+      if (priceDrop >= requiredDip) {
+        // Opcional: Confirmación de rebote (precio actual > precio de cierre anterior)
+        if (prices.length > 1 && currentPrice > prices[1]) {
+          signal = true;
+          reason = `Dip del ${dipPercentage}% detectado y rebote confirmado.`;
+        } else {
+          signal = true; // Considerar señal incluso sin rebote inmediato si el dip es significativo
+          reason = `Dip del ${dipPercentage}% detectado.`;
+        }
+      } else {
+        reason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${dipPercentage}%)`;
+      }
+      console.log(`[${functionName}] Señal de compra: ${signal}, Razón: ${reason}`);
     }
 
-    console.log(`[${functionName}] Señal de compra: ${signal}, Razón: ${reason}`);
-
     if (!signal) {
-      return new Response(JSON.stringify({ message: `No se ejecutó la compra estratégica para ${pair}: ${reason}`, error: reason }), {
+      // Si no hay señal, registrar la operación como 'awaiting_dip_signal'
+      const { error: insertPendingError } = await supabaseAdmin
+        .from('manual_trades')
+        .insert({
+          user_id: user.id,
+          pair: pair,
+          usdt_amount: usdtAmount,
+          take_profit_percentage: takeProfitPercentage,
+          status: 'awaiting_dip_signal', // Nuevo estado
+          strategy_type: 'strategic',
+          dip_percentage: dipPercentage,
+          lookback_minutes: lookbackMinutes,
+          error_message: reason, // Guardar la razón por la que está pendiente
+        });
+
+      if (insertPendingError) {
+        console.error(`[${functionName}] Error al registrar la operación pendiente en DB: ${insertPendingError.message}`);
+        throw new Error(`Error al registrar la operación pendiente en DB: ${insertPendingError.message}`);
+      }
+      console.log(`[${functionName}] Operación estratégica para ${pair} registrada como pendiente.`);
+
+      return new Response(JSON.stringify({ message: `Operación estratégica para ${pair} registrada como pendiente: ${reason}` }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
       });
     }
 
-    // 3. Si hay señal, ejecutar la orden de compra en Binance
+    // Si hay señal, proceder con la compra en Binance
     // Obtener información de intercambio para precisión y límites
     const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${pair}`;
     const exchangeInfoResponse = await fetch(exchangeInfoUrl);
@@ -169,6 +187,8 @@ serve(async (req) => {
         status: 'active',
         binance_order_id_buy: orderResult.orderId.toString(),
         strategy_type: 'strategic', // Marcar como operación estratégica
+        dip_percentage: dipPercentage, // Guardar los parámetros de la estrategia
+        lookback_minutes: lookbackMinutes,
       });
 
     if (insertError) {
