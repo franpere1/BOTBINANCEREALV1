@@ -337,7 +337,8 @@ const ActiveTrades = ({ strategyType }: ActiveTradesProps) => {
   }
 
   return (
-    <div className="overflow-x-auto"> {/* Añadido para permitir el desplazamiento horizontal */}
+    // Añadido para permitir el desplazamiento horizontal
+    <div className="overflow-x-auto"> 
       <Table>
         <TableHeader>
           <TableRow className="border-gray-700 hover:bg-gray-800">
@@ -346,11 +347,11 @@ const ActiveTrades = ({ strategyType }: ActiveTradesProps) => {
             <TableHead className="text-white">Precio Compra</TableHead>
             <TableHead className="text-white">Precio Objetivo</TableHead>
             <TableHead className="text-white">Objetivo (%)</TableHead>
-            <TableHead className="text-white min-w-[80px]">Precio Actual</TableHead> {/* Añadido min-w */}
+            <TableHead className="text-white min-w-[80px]">Precio Actual</TableHead>
             <TableHead className="text-white">Ganancia/Pérdida</TableHead>
             <TableHead className="text-white">Estado</TableHead>
-            {strategyType === 'strategic' && ( // Mostrar solo para operaciones estratégicas
-              <TableHead className="text-white min-w-[150px]">Detalles Estrategia</TableHead> {/* Añadido min-w */}
+            {strategyType === 'strategic' && (
+              <TableHead className="text-white min-w-[150px]">Detalles Estrategia</TableHead>
             )}
             <TableHead className="text-right text-white">Acción</TableHead>
           </TableRow>
