@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useForm } from '@hookform/react-form';
+import { useForm } from 'react-hook-form'; // Corregido: de '@hookform/react-form' a 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
