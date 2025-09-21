@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthProvider';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { History, TrendingUp, TrendingDown, DollarSign } from 'lucide-react'; // Importar DollarSign
+import { History, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
@@ -23,14 +23,14 @@ interface Trade {
   completed_at: string | null;
   error_message: string | null;
   status: string;
-  profit_loss_usdt: number | null; // Nueva columna
+  profit_loss_usdt: number | null;
 }
 
 const fetchCompletedTrades = async (userId: string) => {
   // Fetch from manual_trades
   const { data: manualTrades, error: manualError } = await supabase
     .from('manual_trades')
-    .select('*, sell_price, profit_loss_usdt') // Seleccionar la nueva columna
+    .select('*, sell_price, profit_loss_usdt')
     .eq('user_id', userId)
     .in('status', ['completed', 'error']);
   if (manualError) throw new Error(manualError.message);
@@ -38,7 +38,7 @@ const fetchCompletedTrades = async (userId: string) => {
   // Fetch from signal_trades
   const { data: signalTrades, error: signalError } = await supabase
     .from('signal_trades')
-    .select('*, sell_price, profit_loss_usdt') // Seleccionar la nueva columna
+    .select('*, sell_price, profit_loss_usdt')
     .eq('user_id', userId)
     .in('status', ['completed', 'error']);
   if (signalError) throw new Error(signalError.message);
@@ -78,6 +78,7 @@ const TradeHistory = () => {
   const losingTrades = allSortedTrades?.filter(trade => (trade.profit_loss_usdt || 0) < 0).length || 0;
   const neutralTrades = allSortedTrades?.filter(trade => (trade.profit_loss_usdt || 0) === 0 && trade.status === 'completed').length || 0;
   const errorTrades = allSortedTrades?.filter(trade => trade.status === 'error').length || 0;
+  const totalCapitalUsed = allSortedTrades?.reduce((sum, trade) => sum + (trade.usdt_amount || 0), 0) || 0; // Nuevo cálculo
 
   const totalProfitLossColor = totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400';
   const TotalPnLIcon = totalProfitLoss >= 0 ? TrendingUp : TrendingDown;
@@ -156,6 +157,10 @@ const TradeHistory = () => {
             </span>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-700 rounded-md">
+            <span className="text-gray-300">Capital Usado Total:</span> {/* Nuevo campo */}
+            <span className="font-bold text-white">${totalCapitalUsed.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center justify-between p-3 bg-gray-700 rounded-md">
             <span className="text-gray-300">Operaciones Ganadoras:</span>
             <span className="font-bold text-green-400">{winningTrades}</span>
           </div>
@@ -198,8 +203,7 @@ const TradeHistory = () => {
                   <TableHead className="text-white">Fecha Apertura</TableHead>
                   <TableHead className="text-white">Fecha Cierre</TableHead>
                   <TableHead className="text-white">Estado</TableHead>
-                  <TableHead className="text-white">Ganancia/Pérdida (%)</TableHead>
-                  <TableHead className="text-white">Ganancia/Pérdida (USDT)</TableHead> {/* Nueva columna */}
+                  <TableHead className="text-white">Ganancia/Pérdida</TableHead> {/* Columna combinada */}
                   <TableHead className="text-white">Mensaje Error</TableHead>
                 </TableRow>
               </TableHeader>
@@ -208,12 +212,8 @@ const TradeHistory = () => {
                   const pnlPercentage = (trade.purchase_price && trade.sell_price)
                     ? ((trade.sell_price - trade.purchase_price) / trade.purchase_price) * 100
                     : null;
-                  const pnlColor = pnlPercentage !== null
-                    ? (pnlPercentage >= 0 ? 'text-green-400' : 'text-red-400')
-                    : 'text-gray-400';
+                  const pnlColor = (trade.profit_loss_usdt || 0) >= 0 ? 'text-green-400' : 'text-red-400';
                   
-                  const pnlUsdtColor = (trade.profit_loss_usdt || 0) >= 0 ? 'text-green-400' : 'text-red-400';
-
                   return (
                     <TableRow key={trade.id} className="border-gray-700">
                       <TableCell className="font-medium text-white">{trade.pair}</TableCell>
@@ -229,10 +229,8 @@ const TradeHistory = () => {
                         {trade.status === 'completed' ? 'Completada' : 'Error'}
                       </TableCell>
                       <TableCell className={pnlColor}>
-                        {pnlPercentage !== null ? `${pnlPercentage.toFixed(2)}%` : 'N/A'}
-                      </TableCell>
-                      <TableCell className={pnlUsdtColor}>
                         {trade.profit_loss_usdt !== null ? `$${trade.profit_loss_usdt.toFixed(2)}` : 'N/A'}
+                        {pnlPercentage !== null && ` (${pnlPercentage.toFixed(2)}%)`}
                       </TableCell>
                       <TableCell className="text-red-400">{trade.error_message || 'N/A'}</TableCell>
                     </TableRow>
