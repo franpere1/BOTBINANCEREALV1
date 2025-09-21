@@ -86,6 +86,18 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
+  // Añadir logs aquí para depuración
+  React.useEffect(() => {
+    if (data) {
+      console.log(`[PriceChart] Datos recibidos para ${pair}:`, data.klines);
+      console.log(`[PriceChart] Número de klines para ${pair}:`, data.klines.length);
+    }
+    if (isError) {
+      console.error(`[PriceChart] Error en la query para ${pair}:`, error);
+    }
+  }, [data, isError, error, pair]);
+
+
   if (isError) {
     showError(`Error al cargar los datos del gráfico para ${pair}: ${error?.message}`);
     return (
