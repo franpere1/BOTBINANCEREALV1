@@ -471,6 +471,28 @@ serve(async (req) => {
               console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
             }
 
+            // Calcular profit_loss_usdt si la operación se completó y tenemos los precios
+            console.log(`[${functionName}] Debugging PnL calculation for trade ${trade.id}:`);
+            console.log(`[${functionName}]   actualSellPriceInMonitor: ${actualSellPriceInMonitor}`);
+            console.log(`[${functionName}]   trade.purchase_price: ${trade.purchase_price}`);
+            console.log(`[${functionName}]   trade.asset_amount: ${trade.asset_amount}`);
+
+            let profitLossUsdtInMonitor: number | null = null;
+            if (actualSellPriceInMonitor !== null && trade.purchase_price !== null && trade.asset_amount !== null) {
+              profitLossUsdtInMonitor = (actualSellPriceInMonitor - trade.purchase_price) * trade.asset_amount;
+              console.log(`[${functionName}] Calculated Profit/Loss for trade ${trade.id}: ${profitLossUsdtInMonitor.toFixed(2)} USDT`);
+            } else if (trade.status === 'error' && trade.usdt_amount !== null) {
+              if (trade.purchase_price && trade.asset_amount) {
+                profitLossUsdtInMonitor = -(trade.purchase_price * trade.asset_amount);
+              } else {
+                profitLossUsdtInMonitor = -trade.usdt_amount;
+              }
+              console.log(`[${functionName}] Estimated Loss for failed trade ${trade.id}: ${profitLossUsdtInMonitor.toFixed(2)} USDT`);
+            } else {
+              profitLossUsdtInMonitor = null;
+              console.log(`[${functionName}] Profit/Loss for trade ${trade.id} set to NULL due to missing data.`);
+            }
+
             // Si la operación es manual, se marca como completada y no se reinicia.
             // Si es de señal, se reinicia para el siguiente ciclo de monitoreo.
             if (tableName === 'manual_trades') {
@@ -482,6 +504,7 @@ serve(async (req) => {
                   completed_at: new Date().toISOString(),
                   error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
                   sell_price: actualSellPriceInMonitor, // Nuevo: Guardar el precio de venta
+                  profit_loss_usdt: profitLossUsdtInMonitor, // Guardar la ganancia/pérdida en USDT
                 })
                 .eq('id', trade.id);
               if (updateManualError) {
@@ -502,6 +525,7 @@ serve(async (req) => {
                   binance_order_id_buy: null,
                   error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
                   sell_price: actualSellPriceInMonitor, // Nuevo: Guardar el precio de venta
+                  profit_loss_usdt: profitLossUsdtInMonitor, // Guardar la ganancia/pérdida en USDT
                   // created_at se mantiene para saber cuándo se inició el monitoreo original
                 })
                 .eq('id', trade.id);

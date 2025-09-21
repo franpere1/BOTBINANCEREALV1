@@ -218,6 +218,11 @@ serve(async (req) => {
     }
 
     // Calcular profit_loss_usdt si la operación se completó y tenemos los precios
+    console.log(`[${functionName}] Debugging PnL calculation for trade ${trade.id}:`);
+    console.log(`[${functionName}]   actualSellPrice: ${actualSellPrice}`);
+    console.log(`[${functionName}]   trade.purchase_price: ${trade.purchase_price}`);
+    console.log(`[${functionName}]   trade.asset_amount: ${trade.asset_amount}`);
+
     if (actualSellPrice !== null && trade.purchase_price !== null && trade.asset_amount !== null) {
       profitLossUsdt = (actualSellPrice - trade.purchase_price) * trade.asset_amount;
       console.log(`[${functionName}] Calculated Profit/Loss for trade ${trade.id}: ${profitLossUsdt.toFixed(2)} USDT`);
@@ -236,6 +241,7 @@ serve(async (req) => {
       console.log(`[${functionName}] Estimated Loss for failed trade ${trade.id}: ${profitLossUsdt.toFixed(2)} USDT`);
     } else {
       profitLossUsdt = null; // No se puede calcular o no aplica
+      console.log(`[${functionName}] Profit/Loss for trade ${trade.id} set to NULL due to missing data.`);
     }
 
 
