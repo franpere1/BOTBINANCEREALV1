@@ -1,7 +1,16 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
-import { adjustQuantity, BINANCE_FEE_RATE } from './_utils/binance-helpers.ts';
+
+// Inlined from _utils/binance-helpers.ts
+const adjustQuantity = (qty: number, step: number) => {
+  const precision = Math.max(0, -Math.floor(Math.log10(step)));
+  const adjusted = Math.floor(qty / step) * step;
+  return parseFloat(adjusted.toFixed(precision));
+};
+
+// Tasa de comisión de Binance (0.1%)
+const BINANCE_FEE_RATE = 0.001;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -124,9 +133,6 @@ serve(async (req) => {
               dipReason = `No se detectó un dip suficiente. Caída actual: ${((priceDrop / highPriceInLookback) * 100).toFixed(2)}% (requerido: ${trade.dip_percentage}%)`;
             }
           }
-
-          // Se elimina la lógica de verificación del libro de órdenes.
-          // La compra se ejecutará si hay una señal de dip.
 
           if (dipSignal) {
             console.log(`[${functionName}] DIP signal detected for strategic trade ${trade.id} (${trade.pair}). Initiating buy order.`);
@@ -363,6 +369,7 @@ serve(async (req) => {
             let binanceSellAttemptedInMonitor = false;
             let binanceErrorMessageInMonitor: string | null = null;
             let shouldAttemptBinanceSellInMonitor = true;
+            let binanceSellOrderId: string | null = null;
             let adjustedQuantityInMonitor = 0; // Declarar aquí para que esté disponible en el scope
 
             if (quantityToSell === 0) {
