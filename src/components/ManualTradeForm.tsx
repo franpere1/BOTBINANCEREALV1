@@ -38,7 +38,12 @@ const formSchema = z.object({
   takeProfitPercentage: z.coerce.number().positive("El porcentaje debe ser mayor que 0."),
 });
 
-const ManualTradeForm = () => {
+interface ManualTradeFormProps {
+  selectedPair: string;
+  onPairChange: (pair: string) => void;
+}
+
+const ManualTradeForm = ({ selectedPair, onPairChange }: ManualTradeFormProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,11 +53,16 @@ const ManualTradeForm = () => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      pair: '',
+      pair: selectedPair, // Usar selectedPair del prop
       usdtAmount: 10,
       takeProfitPercentage: 5,
     },
   });
+
+  // Actualizar el valor del formulario cuando selectedPair cambie desde el exterior
+  React.useEffect(() => {
+    form.setValue('pair', selectedPair);
+  }, [selectedPair, form]);
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!user) {
@@ -115,7 +125,11 @@ const ManualTradeForm = () => {
 
       showSuccess(`¡Compra de ${values.pair} ejecutada con éxito!`);
       queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
-      form.reset();
+      form.reset({
+        pair: values.pair, // Mantener el par seleccionado
+        usdtAmount: 10,
+        takeProfitPercentage: 5,
+      });
     } catch (error: any) {
       // Si algo falla, marcar la operación como 'error'
       await supabase
@@ -173,6 +187,7 @@ const ManualTradeForm = () => {
                           className="flex items-center p-3 mb-2 rounded-md cursor-pointer hover:bg-gray-700 transition-colors"
                           onClick={() => {
                             field.onChange(p);
+                            onPairChange(p); // Notificar el cambio al padre
                             setIsDrawerOpen(false);
                           }}
                         >
@@ -190,7 +205,7 @@ const ManualTradeForm = () => {
                   </DrawerContent>
                 </Drawer>
               ) : (
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <Select onValueChange={(value) => { field.onChange(value); onPairChange(value); }} defaultValue={field.value}>
                   <FormControl>
                     <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
                       <SelectValue placeholder="Selecciona un par" />
