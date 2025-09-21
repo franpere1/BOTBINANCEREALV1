@@ -4,7 +4,7 @@ import Sidebar from './Sidebar';
 
 const MainLayout = () => {
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col font-sans">
       <Header />
       <div className="flex flex-1">
         <aside className="w-64 bg-gray-800 text-white flex-col border-r border-gray-700 hidden md:flex"> {/* Ocultar en móviles */}

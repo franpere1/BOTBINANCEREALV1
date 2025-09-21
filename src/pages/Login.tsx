@@ -17,7 +17,7 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-      <div className="w-full max-w-md p-8 rounded-lg shadow-lg bg-gray-800">
+      <div className="w-full max-w-md p-8 rounded-lg shadow-lg bg-gray-800 text-white">
         <Auth
           supabaseClient={supabase}
           appearance={{ theme: ThemeSupa }}
