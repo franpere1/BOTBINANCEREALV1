@@ -15,6 +15,7 @@ interface Trade {
   asset_amount: number | null; // Puede ser null
   purchase_price: number | null; // Puede ser null
   target_price: number | null; // Puede ser null
+  sell_price: number | null; // Nuevo: Precio de venta real
   take_profit_percentage: number;
   created_at: string;
   completed_at: string | null;
@@ -26,7 +27,7 @@ const fetchCompletedTrades = async (userId: string) => {
   // Fetch from manual_trades
   const { data: manualTrades, error: manualError } = await supabase
     .from('manual_trades')
-    .select('*')
+    .select('*, sell_price') // Seleccionar la nueva columna
     .eq('user_id', userId)
     .in('status', ['completed', 'error']);
   if (manualError) throw new Error(manualError.message);
@@ -34,7 +35,7 @@ const fetchCompletedTrades = async (userId: string) => {
   // Fetch from signal_trades
   const { data: signalTrades, error: signalError } = await supabase
     .from('signal_trades')
-    .select('*')
+    .select('*, sell_price') // Seleccionar la nueva columna
     .eq('user_id', userId)
     .in('status', ['completed', 'error']);
   if (signalError) throw new Error(signalError.message);
@@ -107,38 +108,55 @@ const TradeHistory = () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow className="border-gray-700 hover:bg-gray-800">
-              <TableHead className="text-white">Par</TableHead>
-              <TableHead className="text-white">Inversión (USDT)</TableHead>
-              <TableHead className="text-white">Precio Compra</TableHead>
-              <TableHead className="text-white">Precio Objetivo</TableHead>
-              <TableHead className="text-white">Fecha Apertura</TableHead>
-              <TableHead className="text-white">Fecha Cierre</TableHead>
-              <TableHead className="text-white">Estado</TableHead>
-              <TableHead className="text-white">Mensaje Error</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {trades.map((trade) => (
-              <TableRow key={trade.id} className="border-gray-700">
-                <TableCell className="font-medium text-white">{trade.pair}</TableCell>
-                <TableCell className="text-gray-300">{trade.usdt_amount.toFixed(2)}</TableCell>
-                <TableCell className="text-gray-300">{trade.purchase_price?.toFixed(4) || 'N/A'}</TableCell>
-                <TableCell className="text-yellow-400">{trade.target_price?.toFixed(4) || 'N/A'}</TableCell>
-                <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
-                <TableCell className="text-gray-300">
-                  {trade.completed_at ? new Date(trade.completed_at).toLocaleString() : 'N/A'}
-                </TableCell>
-                <TableCell className={`font-bold ${trade.status === 'completed' ? 'text-green-400' : 'text-red-400'}`}>
-                  {trade.status === 'completed' ? 'Completada' : 'Error'}
-                </TableCell>
-                <TableCell className="text-red-400">{trade.error_message || 'N/A'}</TableCell>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-700 hover:bg-gray-800">
+                <TableHead className="text-white">Par</TableHead>
+                <TableHead className="text-white">Inversión (USDT)</TableHead>
+                <TableHead className="text-white">Precio Compra</TableHead>
+                <TableHead className="text-white">Precio Venta</TableHead> {/* Nuevo: Precio de Venta */}
+                <TableHead className="text-white">Precio Objetivo</TableHead>
+                <TableHead className="text-white">Fecha Apertura</TableHead>
+                <TableHead className="text-white">Fecha Cierre</TableHead>
+                <TableHead className="text-white">Estado</TableHead>
+                <TableHead className="text-white">Ganancia/Pérdida (%)</TableHead> {/* Nuevo: Ganancia/Pérdida */}
+                <TableHead className="text-white">Mensaje Error</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {trades.map((trade) => {
+                const pnlPercentage = (trade.purchase_price && trade.sell_price)
+                  ? ((trade.sell_price - trade.purchase_price) / trade.purchase_price) * 100
+                  : null;
+                const pnlColor = pnlPercentage !== null
+                  ? (pnlPercentage >= 0 ? 'text-green-400' : 'text-red-400')
+                  : 'text-gray-400';
+
+                return (
+                  <TableRow key={trade.id} className="border-gray-700">
+                    <TableCell className="font-medium text-white">{trade.pair}</TableCell>
+                    <TableCell className="text-gray-300">{trade.usdt_amount.toFixed(2)}</TableCell>
+                    <TableCell className="text-gray-300">{trade.purchase_price?.toFixed(4) || 'N/A'}</TableCell>
+                    <TableCell className="text-gray-300">{trade.sell_price?.toFixed(4) || 'N/A'}</TableCell> {/* Mostrar precio de venta */}
+                    <TableCell className="text-yellow-400">{trade.target_price?.toFixed(4) || 'N/A'}</TableCell>
+                    <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
+                    <TableCell className="text-gray-300">
+                      {trade.completed_at ? new Date(trade.completed_at).toLocaleString() : 'N/A'}
+                    </TableCell>
+                    <TableCell className={`font-bold ${trade.status === 'completed' ? 'text-green-400' : 'text-red-400'}`}>
+                      {trade.status === 'completed' ? 'Completada' : 'Error'}
+                    </TableCell>
+                    <TableCell className={pnlColor}>
+                      {pnlPercentage !== null ? `${pnlPercentage.toFixed(2)}%` : 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-red-400">{trade.error_message || 'N/A'}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );

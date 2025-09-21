@@ -72,6 +72,7 @@ serve(async (req) => {
     let binanceErrorMessage: string | null = null;
     let shouldAttemptBinanceSell = true; // Bandera para controlar la llamada a la API de Binance
     let adjustedQuantity = 0; // Declarar aquí para que esté disponible en el scope
+    let actualSellPrice: number | null = null; // Nuevo: para almacenar el precio de venta
 
     // Solo intentar vender si la operación tiene una cantidad de activo registrada y es positiva
     if (trade.asset_amount && trade.asset_amount > 0) {
@@ -127,11 +128,6 @@ serve(async (req) => {
         if (actualFreeBalance > 0) {
             // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
             quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
-            
-            // ELIMINADO: La reducción del 0.1% que podía causar que la cantidad se redondeara a cero.
-            // if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
-            //     quantityToSell *= 0.999; // Reduce by 0.1%
-            // }
         }
 
         if (quantityToSell === 0) {
@@ -198,7 +194,19 @@ serve(async (req) => {
                 console.error(`[${functionName}] ${binanceErrorMessage}`);
             } else {
                 binanceSellOrderId = sellOrderData.orderId.toString();
-                console.log(`[${functionName}] Activos de la operación ${trade.id} vendidos en Binance.`);
+                // Calcular el precio de venta promedio de los 'fills'
+                if (sellOrderData.fills && sellOrderData.fills.length > 0) {
+                    let totalQuoteQty = 0;
+                    let totalBaseQty = 0;
+                    for (const fill of sellOrderData.fills) {
+                        totalQuoteQty += parseFloat(fill.price) * parseFloat(fill.qty);
+                        totalBaseQty += parseFloat(fill.qty);
+                    }
+                    if (totalBaseQty > 0) {
+                        actualSellPrice = totalQuoteQty / totalBaseQty;
+                    }
+                }
+                console.log(`[${functionName}] Activos de la operación ${trade.id} vendidos en Binance. Precio de venta: ${actualSellPrice?.toFixed(4) || 'N/A'}`);
             }
         } catch (sellAttemptError: any) {
             binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance: ${sellAttemptError.message}`;
@@ -213,6 +221,7 @@ serve(async (req) => {
       binance_order_id_sell: binanceSellOrderId,
       completed_at: new Date().toISOString(),
       error_message: binanceErrorMessage, // Almacenar cualquier mensaje de error de Binance
+      sell_price: actualSellPrice, // Nuevo: Guardar el precio de venta
     };
 
     if (tradeType === 'manual') {
@@ -226,6 +235,7 @@ serve(async (req) => {
       updatePayload.target_price = null;
       updatePayload.binance_order_id_buy = null;
       updatePayload.error_message = null; // Limpiar errores anteriores al reiniciar
+      updatePayload.sell_price = null; // Nuevo: Limpiar el precio de venta al reiniciar
       // created_at se mantiene para saber cuándo se inició el monitoreo original
       console.log(`[${functionName}] Signal trade ${trade.id} updated to 'awaiting_buy_signal' for recurrence.`);
     } else {

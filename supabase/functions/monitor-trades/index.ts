@@ -371,6 +371,7 @@ serve(async (req) => {
             let shouldAttemptBinanceSellInMonitor = true;
             let binanceSellOrderId: string | null = null;
             let adjustedQuantityInMonitor = 0; // Declarar aquí para que esté disponible en el scope
+            let actualSellPriceInMonitor: number | null = null; // Nuevo: para almacenar el precio de venta
 
             if (quantityToSell === 0) {
               binanceErrorMessageInMonitor = `No hay saldo disponible de ${baseAsset} para vender o la cantidad es demasiado pequeña para ${trade.pair}.`;
@@ -414,6 +415,18 @@ serve(async (req) => {
               } else {
                 console.log(`[${functionName}] Binance SELL order successful for ${trade.pair}. Order ID: ${orderData.orderId}`);
                 binanceSellOrderId = orderData.orderId.toString();
+                // Calcular el precio de venta promedio de los 'fills'
+                if (orderData.fills && orderData.fills.length > 0) {
+                    let totalQuoteQty = 0;
+                    let totalBaseQty = 0;
+                    for (const fill of orderData.fills) {
+                        totalQuoteQty += parseFloat(fill.price) * parseFloat(fill.qty);
+                        totalBaseQty += parseFloat(fill.qty);
+                    }
+                    if (totalBaseQty > 0) {
+                        actualSellPriceInMonitor = totalQuoteQty / totalBaseQty;
+                    }
+                }
               }
             } else {
               console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
@@ -429,6 +442,7 @@ serve(async (req) => {
                   binance_order_id_sell: binanceSellOrderId,
                   completed_at: new Date().toISOString(),
                   error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
+                  sell_price: actualSellPriceInMonitor, // Nuevo: Guardar el precio de venta
                 })
                 .eq('id', trade.id);
               if (updateManualError) {
@@ -448,6 +462,7 @@ serve(async (req) => {
                   target_price: null,
                   binance_order_id_buy: null,
                   error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
+                  sell_price: actualSellPriceInMonitor, // Nuevo: Guardar el precio de venta
                   // created_at se mantiene para saber cuándo se inició el monitoreo original
                 })
                 .eq('id', trade.id);
