@@ -24,7 +24,7 @@ const ManualTrading = () => {
            {/* Eliminado el mensaje de advertencia */}
         </CardHeader>
         <CardContent>
-          <ActiveTrades />
+          <ActiveTrades strategyType="manual" /> {/* Pasar strategyType="manual" */}
         </CardContent>
       </Card>
     </div>

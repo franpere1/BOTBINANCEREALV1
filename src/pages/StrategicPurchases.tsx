@@ -12,7 +12,7 @@ import { showError } from '@/utils/toast';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MinutePriceMonitor from '@/components/MinutePriceMonitor';
-import StrategicPurchaseForm from '@/components/StrategicPurchaseForm'; // Importar el nuevo formulario
+import StrategicPurchaseForm from '@/components/StrategicPurchaseForm';
 import ActiveTrades from '@/components/ActiveTrades'; // Reutilizar ActiveTrades para mostrar las compras estratégicas
 
 const topPairs = [
@@ -172,7 +172,7 @@ const StrategicPurchases = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ActiveTrades /> {/* Reutilizamos este componente para mostrar las operaciones estratégicas */}
+          <ActiveTrades strategyType="strategic" /> {/* Pasar strategyType="strategic" */}
         </CardContent>
       </Card>
     </div>

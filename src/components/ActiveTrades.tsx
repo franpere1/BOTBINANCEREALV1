@@ -8,50 +8,42 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
 import { useState } from 'react';
-import { AlertCircle, Trash2, Edit } from 'lucide-react'; // Importar Edit
+import { AlertCircle, Trash2, Edit } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'; // Importar componentes de Form
-import { Input } from '@/components/ui/input'; // Importar Input
-import { useForm } from 'react-hook-form'; // Importar useForm
-import { zodResolver } from '@hookform/resolvers/zod'; // Importar zodResolver
-import * as z from 'zod'; // Importar zod
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
 
 interface Trade {
   id: string;
   pair: string;
   usdt_amount: number;
-  asset_amount: number | null; // Puede ser null para awaiting_dip_signal
-  purchase_price: number | null; // Puede ser null para awaiting_dip_signal
-  target_price: number | null; // Puede ser null para awaiting_dip_signal
+  asset_amount: number | null;
+  purchase_price: number | null;
+  target_price: number | null;
   take_profit_percentage: number;
   created_at: string;
-  status: 'active' | 'awaiting_dip_signal'; // Añadir el nuevo estado
-  strategy_type: 'manual' | 'strategic'; // Nuevo campo para diferenciar
-  dip_percentage: number | null; // Para trades estratégicos
-  lookback_minutes: number | null; // Para trades estratégicos
-  error_message: string | null; // Para mostrar la razón de 'awaiting_dip_signal'
+  status: 'active' | 'awaiting_dip_signal';
+  strategy_type: 'manual' | 'strategic'; // Ahora es obligatorio
+  dip_percentage: number | null;
+  lookback_minutes: number | null;
+  error_message: string | null;
 }
 
-const fetchActiveTrades = async (userId: string) => {
+const fetchActiveTrades = async (userId: string, strategyType: 'manual' | 'strategic') => {
   const { data, error } = await supabase
     .from('manual_trades')
     .select('*')
     .eq('user_id', userId)
-    .in('status', ['active', 'awaiting_dip_signal']) // Incluir el nuevo estado
+    .eq('strategy_type', strategyType) // Filtrar por strategy_type
+    .in('status', ['active', 'awaiting_dip_signal'])
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data;
 };
 
-const fetchTickerPrice = async (pair: string) => {
-  const { data, error } = await supabase.functions.invoke('get-ticker-price', {
-    body: { pair },
-  });
-  if (error) throw new Error(data?.error || error.message);
-  return parseFloat(data.price);
-};
-
-// Esquema de validación para el formulario de edición de operaciones estratégicas
 const editStrategicFormSchema = z.object({
   usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
   takeProfitPercentage: z.coerce.number().positive("El porcentaje de ganancia debe ser mayor que 0."),
@@ -62,25 +54,25 @@ const editStrategicFormSchema = z.object({
 const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const queryClient = useQueryClient();
   const [isActionLoading, setIsActionLoading] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false); // Estado para el diálogo de edición
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   
   const isAwaitingDipSignal = trade.status === 'awaiting_dip_signal';
+  const isStrategicTrade = trade.strategy_type === 'strategic';
 
   const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
-    enabled: !isAwaitingDipSignal, // Solo cargar precio si no está esperando señal
-    refetchInterval: 5000, // Consultar el precio cada 5 segundos
+    enabled: !isAwaitingDipSignal,
+    refetchInterval: 5000,
   });
 
-  // Inicializar el formulario de edición con los valores actuales del trade
   const editForm = useForm<z.infer<typeof editStrategicFormSchema>>({
     resolver: zodResolver(editStrategicFormSchema),
     defaultValues: {
       usdtAmount: trade.usdt_amount,
       takeProfitPercentage: trade.take_profit_percentage,
-      dipPercentage: trade.dip_percentage || 0.5, // Default si es null
-      lookbackMinutes: trade.lookback_minutes || 15, // Default si es null
+      dipPercentage: trade.dip_percentage || 0.5,
+      lookbackMinutes: trade.lookback_minutes || 15,
     },
   });
 
@@ -103,7 +95,7 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       showSuccess(`Estrategia para ${trade.pair} actualizada con éxito.`);
       queryClient.invalidateQueries({ queryKey: ['activeTrades'] });
       queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
-      setIsEditDialogOpen(false); // Cerrar el diálogo después de guardar
+      setIsEditDialogOpen(false);
     } catch (error: any) {
       showError(`Error al actualizar la estrategia para ${trade.pair}: ${error.message}`);
     } finally {
@@ -115,7 +107,6 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
     setIsActionLoading(true);
     try {
       if (isAwaitingDipSignal) {
-        // Eliminar la operación estratégica pendiente
         const { data, error: functionError } = await supabase.functions.invoke('delete-manual-trade', {
           body: { tradeId: trade.id },
         });
@@ -127,7 +118,6 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
           showSuccess(`Monitoreo de ${trade.pair} eliminado con éxito.`);
         }
       } else {
-        // Cerrar la operación manual activa
         const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
           body: {
             tradeId: trade.id,
@@ -174,22 +164,20 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       }`}>
         {isAwaitingDipSignal ? 'Esperando Dip' : 'Activa'}
       </TableCell>
-      <TableCell className="text-gray-300">
-        {trade.strategy_type === 'strategic' ? (
-          <>
-            Dip: {trade.dip_percentage?.toFixed(1)}% / 
-            Lookback: {trade.lookback_minutes} min
-            {trade.error_message && (
-              <div className="flex items-center text-red-400 text-xs mt-1">
-                <AlertCircle className="h-3 w-3 mr-1" />
-                {trade.error_message}
-              </div>
-            )}
-          </>
-        ) : 'N/A'}
-      </TableCell>
+      {isStrategicTrade && ( // Mostrar solo para operaciones estratégicas
+        <TableCell className="text-gray-300">
+          Dip: {trade.dip_percentage?.toFixed(1)}% / 
+          Lookback: {trade.lookback_minutes} min
+          {trade.error_message && (
+            <div className="flex items-center text-red-400 text-xs mt-1">
+              <AlertCircle className="h-3 w-3 mr-1" />
+              {trade.error_message}
+            </div>
+          )}
+        </TableCell>
+      )}
       <TableCell className="text-right flex items-center justify-end space-x-2">
-        {isAwaitingDipSignal && (
+        {isStrategicTrade && isAwaitingDipSignal && ( // Botón de edición solo para estratégicas pendientes
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
@@ -310,13 +298,17 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   );
 };
 
-const ActiveTrades = () => {
+interface ActiveTradesProps {
+  strategyType: 'manual' | 'strategic';
+}
+
+const ActiveTrades = ({ strategyType }: ActiveTradesProps) => {
   const { user } = useAuth();
   const { data: trades, isLoading, isError } = useQuery({
-    queryKey: ['activeTrades'],
-    queryFn: () => fetchActiveTrades(user!.id),
+    queryKey: ['activeTrades', strategyType], // Incluir strategyType en la clave de la query
+    queryFn: () => fetchActiveTrades(user!.id, strategyType),
     enabled: !!user,
-    refetchInterval: 10000, // Refrescar la lista de trades activos cada 10 segundos
+    refetchInterval: 10000,
   });
 
   if (isLoading) {
@@ -333,7 +325,7 @@ const ActiveTrades = () => {
   }
 
   if (!trades || trades.length === 0) {
-    return <p className="text-center text-gray-400">No tienes operaciones activas o estratégicas pendientes en este momento.</p>;
+    return <p className="text-center text-gray-400">No tienes operaciones {strategyType === 'manual' ? 'manuales' : 'estratégicas'} activas o pendientes en este momento.</p>;
   }
 
   return (
@@ -348,7 +340,9 @@ const ActiveTrades = () => {
           <TableHead className="text-white">Precio Actual</TableHead>
           <TableHead className="text-white">Ganancia/Pérdida</TableHead>
           <TableHead className="text-white">Estado</TableHead>
-          <TableHead className="text-white">Detalles Estrategia</TableHead>
+          {strategyType === 'strategic' && ( // Mostrar solo para operaciones estratégicas
+            <TableHead className="text-white">Detalles Estrategia</TableHead>
+          )}
           <TableHead className="text-right text-white">Acción</TableHead>
         </TableRow>
       </TableHeader>
