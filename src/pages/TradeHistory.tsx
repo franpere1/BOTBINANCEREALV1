@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { History } from 'lucide-react';
+import { useState } from 'react'; // Importar useState
+import { Button } from '@/components/ui/button'; // Importar Button
 
 interface Trade {
   id: string;
@@ -54,11 +56,20 @@ const fetchCompletedTrades = async (userId: string) => {
 
 const TradeHistory = () => {
   const { user } = useAuth();
-  const { data: trades, isLoading, isError } = useQuery<Trade[], Error>({
+  const [displayLimit, setDisplayLimit] = useState(4); // Estado para el límite de operaciones a mostrar
+  
+  const { data: allSortedTrades, isLoading, isError } = useQuery<Trade[], Error>({
     queryKey: ['completedTrades'],
     queryFn: () => fetchCompletedTrades(user!.id),
     enabled: !!user,
   });
+
+  const tradesToDisplay = allSortedTrades ? allSortedTrades.slice(0, displayLimit) : [];
+  const hasMore = allSortedTrades && allSortedTrades.length > displayLimit;
+
+  const handleLoadMore = () => {
+    setDisplayLimit(prevLimit => prevLimit + 10);
+  };
 
   if (isLoading) {
     return (
@@ -80,7 +91,7 @@ const TradeHistory = () => {
     return <p className="text-red-400">Error al cargar el historial de operaciones.</p>;
   }
 
-  if (!trades || trades.length === 0) {
+  if (!tradesToDisplay || tradesToDisplay.length === 0) {
     return (
       <Card className="w-full max-w-lg mx-auto bg-gray-800 border-gray-700 text-center">
         <CardHeader>
@@ -115,17 +126,17 @@ const TradeHistory = () => {
                 <TableHead className="text-white">Par</TableHead>
                 <TableHead className="text-white">Inversión (USDT)</TableHead>
                 <TableHead className="text-white">Precio Compra</TableHead>
-                <TableHead className="text-white">Precio Venta</TableHead> {/* Nuevo: Precio de Venta */}
+                <TableHead className="text-white">Precio Venta</TableHead>
                 <TableHead className="text-white">Precio Objetivo</TableHead>
                 <TableHead className="text-white">Fecha Apertura</TableHead>
                 <TableHead className="text-white">Fecha Cierre</TableHead>
                 <TableHead className="text-white">Estado</TableHead>
-                <TableHead className="text-white">Ganancia/Pérdida (%)</TableHead> {/* Nuevo: Ganancia/Pérdida */}
+                <TableHead className="text-white">Ganancia/Pérdida (%)</TableHead>
                 <TableHead className="text-white">Mensaje Error</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {trades.map((trade) => {
+              {tradesToDisplay.map((trade) => {
                 const pnlPercentage = (trade.purchase_price && trade.sell_price)
                   ? ((trade.sell_price - trade.purchase_price) / trade.purchase_price) * 100
                   : null;
@@ -138,7 +149,7 @@ const TradeHistory = () => {
                     <TableCell className="font-medium text-white">{trade.pair}</TableCell>
                     <TableCell className="text-gray-300">{trade.usdt_amount.toFixed(2)}</TableCell>
                     <TableCell className="text-gray-300">{trade.purchase_price?.toFixed(4) || 'N/A'}</TableCell>
-                    <TableCell className="text-gray-300">{trade.sell_price?.toFixed(4) || 'N/A'}</TableCell> {/* Mostrar precio de venta */}
+                    <TableCell className="text-gray-300">{trade.sell_price?.toFixed(4) || 'N/A'}</TableCell>
                     <TableCell className="text-yellow-400">{trade.target_price?.toFixed(4) || 'N/A'}</TableCell>
                     <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
                     <TableCell className="text-gray-300">
@@ -157,6 +168,13 @@ const TradeHistory = () => {
             </TableBody>
           </Table>
         </div>
+        {hasMore && (
+          <div className="text-center mt-6">
+            <Button onClick={handleLoadMore} disabled={isLoading} className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold">
+              Ver más (10 en 10)
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
