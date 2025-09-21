@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
-import { adjustQuantity } from '../_utils/binance-helpers.ts';
+import { adjustQuantity } from './_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

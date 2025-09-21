@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
-import { adjustQuantity } from '../_utils/binance-helpers.ts';
+import { adjustQuantity } from './_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -112,13 +112,7 @@ serve(async (req) => {
         
         let quantityToSell = 0;
         if (actualFreeBalance > 0) {
-            // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
             quantityToSell = Math.min(trade.asset_amount || actualFreeBalance, actualFreeBalance);
-            
-            // ELIMINADO: La reducción del 0.1% que podía causar que la cantidad se redondeara a cero.
-            // if (quantityToSell > 0.00000001) { // Avoid reducing already tiny amounts to zero
-            //     quantityToSell *= 0.999; // Reduce by 0.1%
-            // }
         }
 
         if (quantityToSell === 0) {
@@ -126,7 +120,6 @@ serve(async (req) => {
           console.warn(`[${functionName}] ${binanceErrorMessage}`);
           shouldAttemptBinanceSell = false;
         } else {
-          // Obtener el precio actual para verificar MIN_NOTIONAL en ventas
           const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${trade.pair}`;
           const tickerPriceResponse = await fetch(tickerPriceUrl);
           const tickerPriceData = await tickerPriceResponse.json();
@@ -153,11 +146,11 @@ serve(async (req) => {
       } catch (sellAttemptError: any) {
         binanceErrorMessage = (binanceErrorMessage ? binanceErrorMessage + "; " : "") + `Error durante el intento de venta en Binance para eliminación: ${sellAttemptError.message}`;
         console.warn(`[${functionName}] ${binanceErrorMessage}`);
-        shouldAttemptBinanceSell = false; // Si hay un error en la preparación, no intentar la venta
+        shouldAttemptBinanceSell = false;
       }
     } else if (trade.status === 'awaiting_buy_signal') {
       console.log(`[${functionName}] Trade ${tradeId} está esperando una señal de compra. No hay activos para vender.`);
-      shouldAttemptBinanceSell = false; // No hay activos para vender
+      shouldAttemptBinanceSell = false;
     }
 
     if (shouldAttemptBinanceSell) {
