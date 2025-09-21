@@ -55,7 +55,7 @@ serve(async (req) => {
     // 1. Obtener los detalles de la operación
     const { data: trade, error: fetchTradeError } = await supabaseAdmin
       .from(tableName)
-      .select('id, pair, asset_amount, user_id')
+      .select('id, pair, usdt_amount, asset_amount, purchase_price, user_id') // Añadir usdt_amount y purchase_price
       .eq('id', tradeId)
       .eq('user_id', user.id) // Asegurar que el usuario es dueño de la operación
       .single();
@@ -73,6 +73,7 @@ serve(async (req) => {
     let shouldAttemptBinanceSell = true; // Bandera para controlar la llamada a la API de Binance
     let adjustedQuantity = 0; // Declarar aquí para que esté disponible en el scope
     let actualSellPrice: number | null = null; // Nuevo: para almacenar el precio de venta
+    let profitLossUsdt: number | null = null; // Nuevo: para almacenar la ganancia/pérdida en USDT
 
     // Solo intentar vender si la operación tiene una cantidad de activo registrada y es positiva
     if (trade.asset_amount && trade.asset_amount > 0) {
@@ -216,12 +217,35 @@ serve(async (req) => {
         console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
     }
 
+    // Calcular profit_loss_usdt si la operación se completó y tenemos los precios
+    if (actualSellPrice !== null && trade.purchase_price !== null && trade.asset_amount !== null) {
+      profitLossUsdt = (actualSellPrice - trade.purchase_price) * trade.asset_amount;
+      console.log(`[${functionName}] Calculated Profit/Loss for trade ${trade.id}: ${profitLossUsdt.toFixed(2)} USDT`);
+    } else if (trade.status === 'error' && trade.usdt_amount !== null) {
+      // Si la operación falló y no se llegó a comprar, la pérdida es la inversión inicial
+      // O si se compró pero no se pudo vender, la pérdida es el valor de compra
+      // Para simplificar, si no hay sell_price y hay error, asumimos una pérdida del capital invertido
+      // Esto es una simplificación y podría refinarse con más lógica de error
+      if (trade.purchase_price && trade.asset_amount) {
+        // Si se compró pero no se vendió, la pérdida es el valor de compra
+        profitLossUsdt = -(trade.purchase_price * trade.asset_amount);
+      } else {
+        // Si no se llegó a comprar, la pérdida es la cantidad de USDT que se intentó invertir
+        profitLossUsdt = -trade.usdt_amount;
+      }
+      console.log(`[${functionName}] Estimated Loss for failed trade ${trade.id}: ${profitLossUsdt.toFixed(2)} USDT`);
+    } else {
+      profitLossUsdt = null; // No se puede calcular o no aplica
+    }
+
+
     // 7. Actualizar el estado de la operación en la base de datos
     const updatePayload: any = {
       binance_order_id_sell: binanceSellOrderId,
       completed_at: new Date().toISOString(),
       error_message: binanceErrorMessage, // Almacenar cualquier mensaje de error de Binance
       sell_price: actualSellPrice, // Nuevo: Guardar el precio de venta
+      profit_loss_usdt: profitLossUsdt, // Nuevo: Guardar la ganancia/pérdida en USDT
     };
 
     if (tradeType === 'manual') {
@@ -236,6 +260,7 @@ serve(async (req) => {
       updatePayload.binance_order_id_buy = null;
       updatePayload.error_message = null; // Limpiar errores anteriores al reiniciar
       updatePayload.sell_price = null; // Nuevo: Limpiar el precio de venta al reiniciar
+      updatePayload.profit_loss_usdt = null; // Nuevo: Limpiar P/L al reiniciar
       // created_at se mantiene para saber cuándo se inició el monitoreo original
       console.log(`[${functionName}] Signal trade ${trade.id} updated to 'awaiting_buy_signal' for recurrence.`);
     } else {
