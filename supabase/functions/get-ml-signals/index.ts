@@ -183,7 +183,16 @@ serve(async (req) => {
   }
 
   try {
-    const { asset: requestedAsset } = await req.json();
+    let requestedAsset: string | undefined;
+    try {
+      const body = await req.json();
+      requestedAsset = body.asset;
+    } catch (jsonError: any) {
+      // Si el parseo falla, significa que no hay cuerpo o es JSON inválido.
+      // Para esta función, lo tratamos como si no se hubiera solicitado un activo específico.
+      console.warn(`[get-ml-signals] No request body or invalid JSON: ${jsonError.message}`);
+    }
+    
     const assetsToProcess = requestedAsset ? [requestedAsset] : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
     const signalsData = [];
 
@@ -211,7 +220,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Unhandled error in get-ml-signals Edge Function:', error);
     return new Response(JSON.stringify({ error: 'Internal Server Error', details: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
