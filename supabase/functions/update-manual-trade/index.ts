@@ -1,14 +1,12 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
+import { BINANCE_FEE_RATE } from '../_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Tasa de comisión de Binance (0.1%)
-const BINANCE_FEE_RATE = 0.001;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -57,7 +55,7 @@ serve(async (req) => {
     // Obtener el trade actual para verificar el estado y purchase_price
     const { data: existingTrade, error: fetchTradeError } = await supabaseAdmin
       .from('manual_trades')
-      .select('purchase_price, status, strategy_type, pair') // También necesitamos el 'pair'
+      .select('purchase_price, status, strategy_type, pair, dip_percentage, lookback_minutes') // También necesitamos el 'pair' y los parámetros de estrategia
       .eq('id', tradeId)
       .eq('user_id', user.id)
       .single();

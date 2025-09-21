@@ -1,17 +1,11 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
+import { adjustQuantity } from '../_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-// Helper para ajustar la cantidad a la precisión del stepSize de Binance
-const adjustQuantity = (qty: number, step: number) => {
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  const adjusted = Math.floor(qty / step) * step;
-  return parseFloat(adjusted.toFixed(precision));
 };
 
 serve(async (req) => {
@@ -183,7 +177,7 @@ serve(async (req) => {
             console.warn(`[${functionName}] ${binanceErrorMessage}`);
         }
     } else {
-        console.log(`[${functionName}] Skipping Binance sell order for trade ${tradeId} due to validation failure or no assets to sell.`);
+        console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
     }
 
     // 3. Siempre eliminar el registro de la base de datos

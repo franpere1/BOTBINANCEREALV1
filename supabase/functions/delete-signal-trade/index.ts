@@ -1,22 +1,11 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
+import { adjustQuantity } from '../_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-// Helper para ajustar la cantidad a la precisión del stepSize de Binance
-const adjustQuantity = (qty: number, step: number) => {
-  // Calculate the number of decimal places from stepSize
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  
-  // Divide by step, floor, then multiply by step to get a quantity that is a multiple of stepSize
-  const adjusted = Math.floor(qty / step) * step;
-  
-  // Format to the correct precision to avoid floating point inaccuracies
-  return parseFloat(adjusted.toFixed(precision));
 };
 
 serve(async (req) => {
@@ -121,7 +110,6 @@ serve(async (req) => {
         const assetBalance = accountData.balances.find((b: any) => b.asset === baseAsset);
         const actualFreeBalance = assetBalance ? parseFloat(assetBalance.free) : 0;
         
-        // Determine the actual quantity to attempt to sell
         let quantityToSell = 0;
         if (actualFreeBalance > 0) {
             // Prioritize selling what's actually available on Binance, capped by what the trade thinks it bought
@@ -197,7 +185,7 @@ serve(async (req) => {
             console.warn(`[${functionName}] ${binanceErrorMessage}`);
         }
     } else {
-        console.log(`[${functionName}] Skipping Binance sell order for trade ${tradeId} due to validation failure or no assets to sell.`);
+        console.log(`[${functionName}] Skipping Binance sell order for trade ${trade.id} due to validation failure or no assets to sell.`);
     }
 
     // 3. Siempre eliminar el registro de la base de datos
@@ -205,7 +193,7 @@ serve(async (req) => {
       .from('signal_trades')
       .delete()
       .eq('id', tradeId)
-      .eq('user.id', user.id); // Asegurar que el usuario es dueño de la operación
+      .eq('user_id', user.id); // Asegurar que el usuario es dueño de la operación
 
     if (deleteError) {
       throw new Error(`Error al eliminar la operación de DB: ${deleteError.message}`);

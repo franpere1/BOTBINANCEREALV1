@@ -1,189 +1,12 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
+import { adjustQuantity, BINANCE_FEE_RATE } from '../_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Helper function to calculate SMA
-function calculateSMA(data: number[], period: number): number {
-  if (data.length < period) return 0;
-  const sum = data.slice(-period).reduce((acc, val) => acc + val, 0);
-  return sum / period;
-}
-
-// Helper function to calculate a series of EMA values
-function calculateEMASeries(data: number[], period: number): number[] {
-  if (data.length < period) return [];
-  const k = 2 / (period + 1);
-  const emas: number[] = [];
-  let currentEMA = calculateSMA(data.slice(0, period), period); // Initial SMA for the first EMA
-  emas.push(currentEMA);
-
-  for (let i = period; i < data.length; i++) {
-    currentEMA = (data[i] - currentEMA) * k + currentEMA;
-    emas.push(currentEMA);
-  }
-  return emas;
-}
-
-// Helper function to calculate Standard Deviation
-function calculateStdDev(data: number[], period: number): number {
-  if (data.length < period) return 0;
-  const slice = data.slice(-period);
-  const mean = slice.reduce((sum, val) => sum + val, 0) / period;
-  const variance = slice.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / period;
-  return Math.sqrt(variance);
-}
-
-// Helper function to calculate RSI
-function calculateRSI(closes: number[], period: number): number {
-  if (closes.length < period + 1) return 0;
-
-  let gains: number[] = [];
-  let losses: number[] = [];
-
-  for (let i = 1; i < closes.length; i++) {
-    const change = closes[i] - closes[i - 1];
-    if (change > 0) {
-      gains.push(change);
-      losses.push(0);
-    } else {
-      gains.push(0);
-      losses.push(Math.abs(change));
-    }
-  }
-
-  let avgGain = 0;
-  let avgLoss = 0;
-
-  // Initial average for the first 'period'
-  for (let i = 0; i < period; i++) {
-    avgGain += gains[i];
-    avgLoss += losses[i];
-  }
-  avgGain /= period;
-  avgLoss /= period;
-
-  // Smoothed average for the rest
-  for (let i = period; i < gains.length; i++) {
-    avgGain = (avgGain * (period - 1) + gains[i]) / period;
-    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
-  }
-
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-// Function to get ML signal for a single asset using Binance API
-async function getMlSignalForAssetFromBinance(asset: string) {
-  // 1. Obtener el precio actual del ticker
-  const tickerPriceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${asset}`;
-  const tickerResponse = await fetch(tickerPriceUrl);
-  const tickerData = await tickerResponse.json();
-  if (!tickerResponse.ok || tickerData.code) {
-    throw new Error(`Error fetching ticker price for ${asset}: ${tickerData.msg || 'Unknown error'}`);
-  }
-  const currentPrice = parseFloat(tickerData.price);
-
-  // 2. Obtener las velas históricas de 1 hora de la API de Binance
-  const klinesUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
-  const klinesResponse = await fetch(klinesUrl);
-  const klinesData = await klinesResponse.json();
-
-  if (!klinesResponse.ok || klinesData.code) {
-    console.error(`Error fetching 1h klines for ${asset} from Binance API:`, klinesData);
-    throw new Error(`Error fetching 1h klines for ${asset}: ${klinesData.msg || 'Unknown error'}`);
-  }
-  const closes = klinesData.map((k: any) => parseFloat(k[4])); // Close price is at index 4
-
-  if (closes.length < 50) { // Necesitamos al menos 50 velas para MA50
-    console.warn(`Not enough 1h klines data for ${asset} from Binance API. Skipping indicator calculations.`);
-    return { asset, signal: 'HOLD', confidence: 0, price: currentPrice };
-  }
-
-  // Calcular Indicadores
-  const ma20 = calculateSMA(closes, 20);
-  const ma50 = calculateSMA(closes, 50);
-  const rsi = calculateRSI(closes, 14);
-
-  const ema12Series = calculateEMASeries(closes, 12);
-  const ema26Series = calculateEMASeries(closes, 26);
-  const macdLineData = ema12Series.slice(ema12Series.length - ema26Series.length).map((e12, i) => e12 - ema26Series[i]);
-  const macdSignalLineSeries = calculateEMASeries(macdLineData, 9);
-
-  const macd = macdLineData.length > 0 ? macdLineData[macdLineData.length - 1] : 0;
-  const macdSignal = macdSignalLineSeries.length > 0 ? macdSignalLineSeries[macdSignalLineSeries.length - 1] : 0;
-  const histMacd = macd - macdSignal;
-
-  const bbPeriod = 20;
-  const bbMiddleBand = calculateSMA(closes, bbPeriod);
-  const stdDev = calculateStdDev(closes, bbPeriod);
-  const upperBand = bbMiddleBand + (stdDev * 2);
-  const lowerBand = bbMiddleBand - (stdDev * 2);
-
-  const volatility = (stdDev / currentPrice) * 100;
-
-  let signal: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
-  let confidence = 0;
-  let rawScore = 0;
-
-  if (rsi < 30) rawScore += 30;
-  else if (rsi < 40) rawScore += 15;
-  else if (rsi > 70) rawScore -= 30;
-  else if (rsi > 60) rawScore -= 15;
-
-  if (macd > macdSignal && histMacd > 0) rawScore += 25;
-  else if (macd < macdSignal && histMacd < 0) rawScore -= 25;
-
-  if (currentPrice > ma20) rawScore += 20;
-  else if (currentPrice < ma20) rawScore -= 20;
-
-  if (currentPrice > ma50) rawScore += 15;
-  else if (currentPrice < ma50) rawScore -= 15;
-
-  if (currentPrice < lowerBand) rawScore += 10;
-  else if (currentPrice > upperBand) rawScore -= 10;
-
-  if (rawScore >= 20) {
-    signal = 'BUY';
-  } else if (rawScore <= -20) {
-    signal = 'SELL';
-  } else {
-    confidence = 50 + (rawScore / 20) * 10;
-  }
-
-  if (signal === 'BUY') {
-    confidence = 50 + Math.max(0, (rawScore - 20) / 80) * 50;
-  } else if (signal === 'SELL') {
-    confidence = 49.9 - Math.max(0, (Math.abs(rawScore) - 20) / 80) * 49.9;
-  } else {
-    confidence = 50 + (rawScore / 20) * 10;
-  }
-  confidence = Math.max(0, Math.min(100, confidence));
-
-  return { asset, signal, confidence, price: currentPrice };
-}
-
-
-// Helper para ajustar la cantidad a la precisión del stepSize de Binance
-const adjustQuantity = (qty: number, step: number) => {
-  // Calculate the number of decimal places from stepSize
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  
-  // Divide by step, floor, then multiply by step to get a quantity that is a multiple of stepSize
-  const adjusted = Math.floor(qty / step) * step;
-  
-  // Format to the correct precision to avoid floating point inaccuracies
-  return parseFloat(adjusted.toFixed(precision));
-};
-
-// Tasa de comisión de Binance (0.1%)
-const BINANCE_FEE_RATE = 0.001;
-
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -428,7 +251,22 @@ serve(async (req) => {
         } else if (trade.status === 'awaiting_buy_signal') {
           // Lógica para operaciones esperando señal de compra (ML Signals)
           console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal.`);
-          const mlSignal = await getMlSignalForAssetFromBinance(trade.pair);
+          
+          // Invocar la función get-ml-signals para obtener la señal
+          const { data: mlSignalData, error: mlSignalError } = await supabaseAdmin.functions.invoke('get-ml-signals', {
+            body: { asset: trade.pair },
+          });
+
+          if (mlSignalError) {
+            console.error(`[${functionName}] Error invoking get-ml-signals for ${trade.pair}:`, mlSignalError);
+            await supabaseAdmin
+              .from(tableName)
+              .update({ status: 'error', error_message: `Error al obtener señal de ML: ${mlSignalError.message}` })
+              .eq('id', trade.id);
+            continue;
+          }
+          
+          const mlSignal = mlSignalData[0]; // get-ml-signals devuelve un array, tomamos el primero
 
           if (mlSignal.signal === 'BUY' && mlSignal.confidence >= 70) {
             console.log(`[${functionName}] BUY signal detected for ${trade.pair} with ${mlSignal.confidence.toFixed(1)}% confidence. Initiating buy order.`);

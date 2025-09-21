@@ -1,19 +1,11 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
+import { adjustQuantity, BINANCE_FEE_RATE } from '../_utils/binance-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-// Tasa de comisión de Binance (0.1%)
-const BINANCE_FEE_RATE = 0.001;
-
-// Helper para ajustar la cantidad a la precisión del stepSize de Binance
-const adjustQuantity = (qty: number, step: number) => {
-  const precision = Math.max(0, -Math.floor(Math.log10(step)));
-  return parseFloat(qty.toFixed(precision));
 };
 
 serve(async (req) => {
