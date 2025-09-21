@@ -16,13 +16,14 @@ import {
   Title,
   Tooltip,
   Legend,
+  TimeScale, // Importar TimeScale
 } from 'chart.js';
-import 'chartjs-chart-financial'; // Import the financial chart plugin
+import 'chartjs-adapter-date-fns'; // Importar el adaptador de date-fns
 import { CandlestickController, CandlestickElement } from 'chartjs-chart-financial';
 import { AlertCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { showError } from '@/utils/toast';
 
-// Register Chart.js components and financial plugin
+// Registrar Chart.js components y financial plugin
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -32,6 +33,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
+  TimeScale, // Registrar TimeScale
   CandlestickController,
   CandlestickElement
 );
@@ -134,14 +136,76 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
     );
   }
 
-  const chartData = {
-    labels: klines.map(k => new Date(k.date).toLocaleTimeString()),
+  // Helper para obtener el valor x como marca de tiempo en milisegundos
+  const getX = (kline: KlineData) => kline.time * 1000;
+
+  const chartOptionsBase: any = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: {
+          color: 'rgb(200, 200, 200)',
+        },
+      },
+      tooltip: {
+        callbacks: {
+          title: function(context: any) {
+            if (context[0]?.parsed?.x) {
+              return new Date(context[0].parsed.x).toLocaleString();
+            }
+            return context[0]?.label || '';
+          },
+          label: function(context: any) {
+            if (context.dataset.type === 'candlestick') {
+              const { o, h, l, c } = context.raw;
+              return [
+                `Open: ${o.toFixed(4)}`,
+                `High: ${h.toFixed(4)}`,
+                `Low: ${l.toFixed(4)}`,
+                `Close: ${c.toFixed(4)}`,
+              ];
+            }
+            return `${context.dataset.label}: ${context.raw.y !== undefined ? context.raw.y.toFixed(4) : context.raw.toFixed(4)}`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        type: 'time', // Usar escala de tiempo
+        time: {
+          unit: 'minute', // Mostrar en minutos
+          tooltipFormat: 'MMM d, HH:mm', // Formato para tooltips
+          displayFormats: {
+            minute: 'HH:mm', // Formato para etiquetas del eje
+          },
+        },
+        ticks: {
+          color: 'rgb(150, 150, 150)',
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)',
+        },
+      },
+      y: {
+        ticks: {
+          color: 'rgb(150, 150, 150)',
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)',
+        },
+      },
+    },
+  };
+
+  const candlestickChartData = {
     datasets: [
       {
         label: 'Velas',
         type: 'candlestick',
         data: klines.map(k => ({
-          x: new Date(k.date).toLocaleTimeString(),
+          x: getX(k), // Usar marca de tiempo en milisegundos
           o: k.open,
           h: k.high,
           l: k.low,
@@ -158,10 +222,10 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       {
         label: 'MA20',
         type: 'line',
-        data: klines.map((_, i) => {
-          if (i < 19) return null; // MA20 needs 20 data points
+        data: klines.map((k, i) => {
+          if (i < 19) return { x: getX(k), y: null }; // Usar marca de tiempo
           const slice = klines.slice(0, i + 1).map(k => k.close);
-          return calculateSMA(slice, 20);
+          return { x: getX(k), y: calculateSMA(slice, 20) };
         }),
         borderColor: 'rgba(255, 206, 86, 1)',
         borderWidth: 1,
@@ -171,10 +235,10 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       {
         label: 'MA50',
         type: 'line',
-        data: klines.map((_, i) => {
-          if (i < 49) return null; // MA50 needs 50 data points
+        data: klines.map((k, i) => {
+          if (i < 49) return { x: getX(k), y: null }; // Usar marca de tiempo
           const slice = klines.slice(0, i + 1).map(k => k.close);
-          return calculateSMA(slice, 50);
+          return { x: getX(k), y: calculateSMA(slice, 50) };
         }),
         borderColor: 'rgba(54, 162, 235, 1)',
         borderWidth: 1,
@@ -184,12 +248,11 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
     ],
   };
 
-  const volumeData = {
-    labels: klines.map(k => new Date(k.date).toLocaleTimeString()),
+  const volumeChartData = {
     datasets: [
       {
         label: 'Volumen',
-        data: klines.map(k => k.volume),
+        data: klines.map(k => ({ x: getX(k), y: k.volume })), // Usar marca de tiempo
         backgroundColor: klines.map(k => k.close >= k.open ? 'rgba(75, 192, 192, 0.5)' : 'rgba(255, 99, 132, 0.5)'),
         borderColor: klines.map(k => k.close >= k.open ? 'rgba(75, 192, 192, 1)' : 'rgba(255, 99, 132, 1)'),
         borderWidth: 1,
@@ -197,15 +260,14 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
     ],
   };
 
-  const rsiData = {
-    labels: klines.map(k => new Date(k.date).toLocaleTimeString()),
+  const rsiChartData = {
     datasets: [
       {
         label: 'RSI',
-        data: klines.map((_, i) => {
-          if (i < 13) return null; // RSI needs 14 data points
+        data: klines.map((k, i) => {
+          if (i < 13) return { x: getX(k), y: null }; // Usar marca de tiempo
           const slice = klines.slice(0, i + 1).map(k => k.close);
-          return calculateRSI(slice, 14);
+          return { x: getX(k), y: calculateRSI(slice, 14) };
         }),
         borderColor: 'rgba(153, 102, 255, 1)',
         borderWidth: 1,
@@ -214,7 +276,7 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       },
       {
         label: 'Sobrecompra (70)',
-        data: klines.map(() => 70),
+        data: klines.map(k => ({ x: getX(k), y: 70 })), // Usar marca de tiempo
         borderColor: 'rgba(255, 99, 132, 0.5)',
         borderWidth: 1,
         borderDash: [5, 5],
@@ -223,7 +285,7 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       },
       {
         label: 'Sobrevendido (30)',
-        data: klines.map(() => 30),
+        data: klines.map(k => ({ x: getX(k), y: 30 })), // Usar marca de tiempo
         borderColor: 'rgba(75, 192, 192, 0.5)',
         borderWidth: 1,
         borderDash: [5, 5],
@@ -233,21 +295,20 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
     ],
   };
 
-  const macdData = {
-    labels: klines.map(k => new Date(k.date).toLocaleTimeString()),
+  const macdChartData = {
     datasets: [
       {
         label: 'MACD',
-        data: klines.map((_, i) => {
-          if (i < 25) return null; // MACD needs 26 data points for EMA26
+        data: klines.map((k, i) => {
+          if (i < 25) return { x: getX(k), y: null }; // Usar marca de tiempo
           const closesSlice = klines.slice(0, i + 1).map(k => k.close);
           const ema12Series = calculateEMASeries(closesSlice, 12);
           const ema26Series = calculateEMASeries(closesSlice, 26);
           if (ema12Series.length > 0 && ema26Series.length > 0) {
             const macdLineData = ema12Series.slice(ema12Series.length - ema26Series.length).map((e12, idx) => e12 - ema26Series[idx]);
-            return macdLineData[macdLineData.length - 1];
+            return { x: getX(k), y: macdLineData[macdLineData.length - 1] };
           }
-          return null;
+          return { x: getX(k), y: null };
         }),
         borderColor: 'rgba(255, 159, 64, 1)',
         borderWidth: 1,
@@ -256,17 +317,17 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       },
       {
         label: 'Signal Line',
-        data: klines.map((_, i) => {
-          if (i < 33) return null; // Signal line needs 9 data points after MACD line (26 + 9 - 1)
+        data: klines.map((k, i) => {
+          if (i < 33) return { x: getX(k), y: null }; // Usar marca de tiempo
           const closesSlice = klines.slice(0, i + 1).map(k => k.close);
           const ema12Series = calculateEMASeries(closesSlice, 12);
           const ema26Series = calculateEMASeries(closesSlice, 26);
           if (ema12Series.length > 0 && ema26Series.length > 0) {
             const macdLineData = ema12Series.slice(ema12Series.length - ema26Series.length).map((e12, idx) => e12 - ema26Series[idx]);
             const macdSignalLineSeries = calculateEMASeries(macdLineData, 9);
-            return macdSignalLineSeries[macdSignalLineSeries.length - 1];
+            return { x: getX(k), y: macdSignalLineSeries[macdSignalLineSeries.length - 1] };
           }
-          return null;
+          return { x: getX(k), y: null };
         }),
         borderColor: 'rgba(75, 192, 192, 1)',
         borderWidth: 1,
@@ -274,52 +335,6 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
         fill: false,
       },
     ],
-  };
-
-  const chartOptions: any = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: {
-          color: 'rgb(200, 200, 200)', // White color for legend text
-        },
-      },
-      tooltip: {
-        callbacks: {
-          label: function(context: any) {
-            if (context.dataset.type === 'candlestick') {
-              const { o, h, l, c } = context.raw;
-              return [
-                `Open: ${o.toFixed(4)}`,
-                `High: ${h.toFixed(4)}`,
-                `Low: ${l.toFixed(4)}`,
-                `Close: ${c.toFixed(4)}`,
-              ];
-            }
-            return `${context.dataset.label}: ${context.raw.toFixed(4)}`;
-          }
-        }
-      }
-    },
-    scales: {
-      x: {
-        ticks: {
-          color: 'rgb(150, 150, 150)', // Grey color for x-axis labels
-        },
-        grid: {
-          color: 'rgba(255, 255, 255, 0.1)', // Light grid lines
-        },
-      },
-      y: {
-        ticks: {
-          color: 'rgb(150, 150, 150)', // Grey color for y-axis labels
-        },
-        grid: {
-          color: 'rgba(255, 255, 255, 0.1)', // Light grid lines
-        },
-      },
-    },
   };
 
   const indicatorCardClass = "bg-gray-700 border-gray-600 p-3 rounded-md text-sm flex items-center justify-between";
@@ -336,16 +351,16 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="h-[400px]">
-          <Chart type='candlestick' data={chartData} options={chartOptions} />
+          <Chart type='candlestick' data={candlestickChartData} options={chartOptionsBase} />
         </div>
         <div className="h-[150px]">
-          <Bar data={volumeData} options={chartOptions} />
+          <Bar data={volumeChartData} options={chartOptionsBase} />
         </div>
         <div className="h-[150px]">
-          <Line data={rsiData} options={chartOptions} />
+          <Line data={rsiChartData} options={chartOptionsBase} />
         </div>
         <div className="h-[150px]">
-          <Line data={macdData} options={chartOptions} />
+          <Line data={macdChartData} options={chartOptionsBase} />
         </div>
 
         <h3 className="text-xl font-bold text-yellow-400 mt-8">Indicadores Actuales</h3>
@@ -402,7 +417,7 @@ export default PriceChart;
 function calculateSMA(data: number[], period: number): number {
   if (data.length < period) return 0;
   const sum = data.slice(-period).reduce((acc, val) => acc + val, 0);
-  return sum / period;
+  return parseFloat((sum / period).toFixed(4)); // Asegurar precisión
 }
 
 function calculateEMASeries(data: number[], period: number): number[] {
@@ -414,7 +429,7 @@ function calculateEMASeries(data: number[], period: number): number[] {
 
   for (let i = period; i < data.length; i++) {
     currentEMA = (data[i] - currentEMA) * k + currentEMA;
-    emas.push(currentEMA);
+    emas.push(parseFloat(currentEMA.toFixed(4))); // Asegurar precisión
   }
   return emas;
 }
@@ -453,5 +468,5 @@ function calculateRSI(closes: number[], period: number): number {
 
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
+  return parseFloat((100 - (100 / (1 + rs))).toFixed(2)); // Asegurar precisión
 }
