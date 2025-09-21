@@ -40,6 +40,8 @@ serve(async (req) => {
         }
 
         const kline = klinesData[0];
+        console.log(`[${functionName}] Raw kline data for ${asset}:`, kline); // Log de los datos crudos de la vela
+
         const [
           openTime,
           openPrice,
@@ -55,16 +57,24 @@ serve(async (req) => {
           ignore
         ] = kline;
 
+        const parsedOpenPrice = parseFloat(openPrice);
+        const parsedHighPrice = parseFloat(highPrice);
+        const parsedLowPrice = parseFloat(lowPrice);
+        const parsedClosePrice = parseFloat(closePrice);
+        const parsedVolume = parseFloat(volume);
+
+        console.log(`[${functionName}] Parsed prices for ${asset}: Open=${parsedOpenPrice}, High=${parsedHighPrice}, Low=${parsedLowPrice}, Close=${parsedClosePrice}, Volume=${parsedVolume}`); // Log de los precios parseados
+
         // Insertar el nuevo precio de cierre y otros datos de la vela
         const { error: insertError } = await supabaseAdmin
           .from('minute_prices')
           .insert({
             asset: asset,
-            open_price: parseFloat(openPrice),
-            high_price: parseFloat(highPrice),
-            low_price: parseFloat(lowPrice),
-            close_price: parseFloat(closePrice),
-            volume: parseFloat(volume),
+            open_price: parsedOpenPrice,
+            high_price: parsedHighPrice,
+            low_price: parsedLowPrice,
+            close_price: parsedClosePrice,
+            volume: parsedVolume,
             created_at: new Date(openTime).toISOString(), // Usar openTime como timestamp
           });
 
