@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Line, Bar, Chart } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
-  CategoryScale,
+  // CategoryScale, // Eliminado: CategoryScale puede causar conflictos con TimeScale para datos financieros
   LinearScale,
   PointElement,
   LineElement,
@@ -16,16 +16,16 @@ import {
   Title,
   Tooltip,
   Legend,
-  TimeScale, // Importar TimeScale
+  TimeScale,
 } from 'chart.js';
-import 'chartjs-adapter-date-fns'; // Importar el adaptador de date-fns
+import 'chartjs-adapter-date-fns';
 import { CandlestickController, CandlestickElement } from 'chartjs-chart-financial';
 import { AlertCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { showError } from '@/utils/toast';
 
 // Registrar Chart.js components y financial plugin
 ChartJS.register(
-  CategoryScale,
+  // CategoryScale, // Eliminado
   LinearScale,
   PointElement,
   LineElement,
@@ -33,7 +33,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  TimeScale, // Registrar TimeScale
+  TimeScale,
   CandlestickController,
   CandlestickElement
 );
@@ -218,6 +218,10 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
           down: 'rgba(255, 99, 132, 0.8)',
           unchanged: 'rgba(201, 203, 207, 0.8)'
         },
+        barThickness: 'flex', // Asegura que las barras se ajusten al espacio disponible
+        categoryPercentage: 0.8, // Espacio que ocupa la categoría
+        barPercentage: 0.8, // Ancho de la barra dentro de la categoría
+        borderSkipped: false, // Asegura que los bordes de las velas se dibujen
       },
       {
         label: 'MA20',
