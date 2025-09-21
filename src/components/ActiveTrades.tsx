@@ -44,6 +44,14 @@ const fetchActiveTrades = async (userId: string, strategyType: 'manual' | 'strat
   return data;
 };
 
+const fetchTickerPrice = async (pair: string) => {
+  const { data, error } = await supabase.functions.invoke('get-ticker-price', {
+    body: { pair },
+  });
+  if (error) throw new Error(data?.error || error.message);
+  return parseFloat(data.price);
+};
+
 const editStrategicFormSchema = z.object({
   usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
   takeProfitPercentage: z.coerce.number().positive("El porcentaje de ganancia debe ser mayor que 0."),
@@ -329,29 +337,31 @@ const ActiveTrades = ({ strategyType }: ActiveTradesProps) => {
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="border-gray-700 hover:bg-gray-800">
-          <TableHead className="text-white">Par</TableHead>
-          <TableHead className="text-white">Fecha Apertura</TableHead>
-          <TableHead className="text-white">Precio Compra</TableHead>
-          <TableHead className="text-white">Precio Objetivo</TableHead>
-          <TableHead className="text-white">Objetivo (%)</TableHead>
-          <TableHead className="text-white">Precio Actual</TableHead>
-          <TableHead className="text-white">Ganancia/Pérdida</TableHead>
-          <TableHead className="text-white">Estado</TableHead>
-          {strategyType === 'strategic' && ( // Mostrar solo para operaciones estratégicas
-            <TableHead className="text-white">Detalles Estrategia</TableHead>
-          )}
-          <TableHead className="text-right text-white">Acción</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {trades.map((trade) => (
-          <ActiveTradeRow key={trade.id} trade={trade} />
-        ))}
-      </TableBody>
-    </Table>
+    <div className="overflow-x-auto"> {/* Añadido para permitir el desplazamiento horizontal */}
+      <Table>
+        <TableHeader>
+          <TableRow className="border-gray-700 hover:bg-gray-800">
+            <TableHead className="text-white">Par</TableHead>
+            <TableHead className="text-white">Fecha Apertura</TableHead>
+            <TableHead className="text-white">Precio Compra</TableHead>
+            <TableHead className="text-white">Precio Objetivo</TableHead>
+            <TableHead className="text-white">Objetivo (%)</TableHead>
+            <TableHead className="text-white min-w-[80px]">Precio Actual</TableHead> {/* Añadido min-w */}
+            <TableHead className="text-white">Ganancia/Pérdida</TableHead>
+            <TableHead className="text-white">Estado</TableHead>
+            {strategyType === 'strategic' && ( // Mostrar solo para operaciones estratégicas
+              <TableHead className="text-white min-w-[150px]">Detalles Estrategia</TableHead> {/* Añadido min-w */}
+            )}
+            <TableHead className="text-right text-white">Acción</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {trades.map((trade) => (
+            <ActiveTradeRow key={trade.id} trade={trade} />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 };
 
