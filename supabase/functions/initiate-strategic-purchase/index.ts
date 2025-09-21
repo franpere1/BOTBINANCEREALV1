@@ -103,8 +103,56 @@ serve(async (req) => {
       console.log(`[${functionName}] Señal de dip: ${dipSignal}, Razón: ${dipReason}`);
     }
 
+    // --- INICIO: Verificación de saldo USDT antes de cualquier acción de compra ---
+    const timestamp = Date.now();
+    const accountQueryString = `timestamp=${timestamp}`;
+    const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
+    const accountUrl = `https://api.binance.com/api/v3/account?${accountQueryString}&signature=${accountSignature}`;
+
+    const accountResponse = await fetch(accountUrl, {
+      method: 'GET',
+      headers: { 'X-MBX-APIKEY': api_key },
+    });
+    const accountData = await accountResponse.json();
+
+    if (!accountResponse.ok) {
+      throw new Error(`Error al obtener el balance de la cuenta de Binance: ${accountData.msg || 'Error desconocido'}`);
+    }
+
+    const usdtBalance = accountData.balances.find((b: any) => b.asset === 'USDT');
+    const availableUSDT = usdtBalance ? parseFloat(usdtBalance.free) : 0;
+
+    if (availableUSDT < usdtAmount) {
+      const insufficientBalanceMessage = `Saldo insuficiente de USDT. Disponible: ${availableUSDT.toFixed(2)} USDT, Requerido: ${usdtAmount.toFixed(2)} USDT.`;
+      console.warn(`[${functionName}] ${insufficientBalanceMessage}`);
+      // Registrar como pendiente con el mensaje de error de saldo
+      const { error: insertPendingError } = await supabaseAdmin
+        .from('manual_trades')
+        .insert({
+          user_id: user.id,
+          pair: pair,
+          usdt_amount: usdtAmount,
+          take_profit_percentage: takeProfitPercentage,
+          status: 'awaiting_dip_signal',
+          strategy_type: 'strategic',
+          dip_percentage: dipPercentage,
+          lookback_minutes: lookbackMinutes,
+          error_message: insufficientBalanceMessage,
+        });
+
+      if (insertPendingError) {
+        console.error(`[${functionName}] Error al registrar la operación pendiente por saldo en DB: ${insertPendingError.message}`);
+        throw new Error(`Error al registrar la operación pendiente por saldo en DB: ${insertPendingError.message}`);
+      }
+      return new Response(JSON.stringify({ message: `Operación estratégica para ${pair} registrada como pendiente: ${insufficientBalanceMessage}` }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
+    }
+    // --- FIN: Verificación de saldo USDT ---
+
     if (!dipSignal) {
-      // Si no hay señal de dip, registrar como pendiente
+      // Si no hay señal de dip, registrar como pendiente (pero ya sabemos que hay saldo)
       const finalReason = `No se ejecutó la compra. Razón del dip: ${dipReason}.`;
       const { error: insertPendingError } = await supabaseAdmin
         .from('manual_trades')
@@ -132,7 +180,7 @@ serve(async (req) => {
       });
     }
 
-    // Si hay señal de dip, proceder con la compra en Binance
+    // Si hay señal de dip Y hay saldo, proceder con la compra en Binance
     // Obtener información de intercambio para precisión y límites
     const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${pair}`;
     const exchangeInfoResponse = await fetch(exchangeInfoUrl);
@@ -155,7 +203,7 @@ serve(async (req) => {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'X-MBX-APIKEY': api_key },
+      headers: { 'X-MBX-APIKEY': api_key, 'Content-Type': 'application/json' }, // Añadir Content-Type
     });
 
     const orderResult = await response.json();

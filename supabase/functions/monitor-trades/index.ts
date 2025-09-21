@@ -86,6 +86,45 @@ serve(async (req) => {
 
         const { api_key, api_secret } = keys;
 
+        // --- INICIO: Verificación de saldo USDT antes de cualquier compra ---
+        if (trade.status === 'awaiting_dip_signal' || trade.status === 'awaiting_buy_signal') {
+          const timestamp = Date.now();
+          const accountQueryString = `timestamp=${timestamp}`;
+          const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
+          const accountUrl = `https://api.binance.com/api/v3/account?${accountQueryString}&signature=${accountSignature}`;
+
+          const accountResponse = await fetch(accountUrl, {
+            method: 'GET',
+            headers: { 'X-MBX-APIKEY': api_key },
+          });
+          const accountData = await accountResponse.json();
+
+          if (!accountResponse.ok) {
+            const errorMessage = `Error al obtener el balance de la cuenta de Binance para el usuario ${trade.user_id}: ${accountData.msg || 'Error desconocido'}`;
+            console.error(`[${functionName}] ${errorMessage}`);
+            await supabaseAdmin
+              .from(tableName)
+              .update({ status: 'error', error_message: errorMessage })
+              .eq('id', trade.id);
+            continue; // Saltar a la siguiente operación
+          }
+
+          const usdtBalance = accountData.balances.find((b: any) => b.asset === 'USDT');
+          const availableUSDT = usdtBalance ? parseFloat(usdtBalance.free) : 0;
+
+          if (availableUSDT < trade.usdt_amount) {
+            const insufficientBalanceMessage = `Saldo insuficiente de USDT. Disponible: ${availableUSDT.toFixed(2)} USDT, Requerido: ${trade.usdt_amount.toFixed(2)} USDT.`;
+            console.warn(`[${functionName}] ${insufficientBalanceMessage}`);
+            await supabaseAdmin
+              .from(tableName)
+              .update({ error_message: insufficientBalanceMessage }) // Actualizar solo el mensaje de error, mantener el estado de espera
+              .eq('id', trade.id);
+            continue; // Saltar a la siguiente operación
+          }
+        }
+        // --- FIN: Verificación de saldo USDT ---
+
+
         if (trade.status === 'awaiting_dip_signal') {
           // Lógica para operaciones estratégicas esperando un dip
           console.log(`[${functionName}] Strategic trade ${trade.id} (${trade.pair}) is awaiting DIP signal.`);

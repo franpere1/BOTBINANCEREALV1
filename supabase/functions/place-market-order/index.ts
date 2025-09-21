@@ -19,6 +19,8 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const functionName = 'place-market-order';
+
   try {
     // Autenticación y obtención de claves de API
     const authHeader = req.headers.get('Authorization');
@@ -75,6 +77,30 @@ serve(async (req) => {
     let queryString = `symbol=${pair}&side=${side.toUpperCase()}&type=MARKET&timestamp=${Date.now()}`;
     
     if (side.toUpperCase() === 'BUY' && quoteOrderQty) {
+      // --- INICIO: Verificación de saldo USDT ---
+      const timestamp = Date.now();
+      const accountQueryString = `timestamp=${timestamp}`;
+      const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
+      const accountUrl = `https://api.binance.com/api/v3/account?${accountQueryString}&signature=${accountSignature}`;
+
+      const accountResponse = await fetch(accountUrl, {
+        method: 'GET',
+        headers: { 'X-MBX-APIKEY': api_key },
+      });
+      const accountData = await accountResponse.json();
+
+      if (!accountResponse.ok) {
+        throw new Error(`Error al obtener el balance de la cuenta de Binance: ${accountData.msg || 'Error desconocido'}`);
+      }
+
+      const usdtBalance = accountData.balances.find((b: any) => b.asset === 'USDT');
+      const availableUSDT = usdtBalance ? parseFloat(usdtBalance.free) : 0;
+
+      if (availableUSDT < quoteOrderQty) {
+        throw new Error(`Saldo insuficiente de USDT. Disponible: ${availableUSDT.toFixed(2)} USDT, Requerido: ${quoteOrderQty.toFixed(2)} USDT.`);
+      }
+      // --- FIN: Verificación de saldo USDT ---
+
       if (quoteOrderQty < minNotional) {
         throw new Error(`La cantidad de la orden en USDT (${quoteOrderQty}) es menor que el mínimo nocional (${minNotional}) para ${pair}.`);
       }
@@ -109,7 +135,7 @@ serve(async (req) => {
     });
 
   } catch (error: any) {
-    console.error('Error en la Edge Function place-market-order:', error);
+    console.error(`Error en la Edge Function ${functionName}:`, error);
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500, 
