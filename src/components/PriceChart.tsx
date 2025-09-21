@@ -187,6 +187,7 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
         grid: {
           color: 'rgba(255, 255, 255, 0.1)',
         },
+        bounds: 'ticks', // Asegurar que todos los ticks estén visibles
       },
       y: {
         ticks: {
@@ -203,7 +204,7 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
     datasets: [
       {
         label: 'Velas',
-        type: 'candlestick',
+        type: CandlestickController.id, // Usar el ID del controlador explícitamente
         data: klines.map(k => ({
           x: getX(k), // Usar marca de tiempo en milisegundos
           o: k.open,
@@ -222,6 +223,7 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
         categoryPercentage: 0.8, // Espacio que ocupa la categoría
         barPercentage: 0.8, // Ancho de la barra dentro de la categoría
         borderSkipped: false, // Asegura que los bordes de las velas se dibujen
+        minBarLength: 2, // Asegura una longitud mínima visible para las barras
       },
       {
         label: 'MA20',
@@ -355,7 +357,7 @@ const PriceChart = ({ pair, lookbackMinutes = 60 }: PriceChartProps) => {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="h-[400px]">
-          <Chart type='candlestick' data={candlestickChartData} options={chartOptionsBase} />
+          <Chart type={CandlestickController.id} data={candlestickChartData} options={chartOptionsBase} />
         </div>
         <div className="h-[150px]">
           <Bar data={volumeChartData} options={chartOptionsBase} />
