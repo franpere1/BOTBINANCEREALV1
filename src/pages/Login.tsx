@@ -6,14 +6,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthProvider';
 
 const Login = () => {
-  const { session } = useAuth();
+  const { session, isLoading } = useAuth(); // Obtener isLoading
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (session) {
+    // Solo redirigir si la carga ha terminado y hay una sesión
+    if (!isLoading && session) {
       navigate('/');
     }
-  }, [session, navigate]);
+  }, [session, isLoading, navigate]); // Añadir isLoading a las dependencias
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center">
