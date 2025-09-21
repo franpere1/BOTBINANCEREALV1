@@ -78,10 +78,11 @@ const TradeHistory = () => {
   const losingTrades = allSortedTrades?.filter(trade => (trade.profit_loss_usdt || 0) < 0).length || 0;
   const neutralTrades = allSortedTrades?.filter(trade => (trade.profit_loss_usdt || 0) === 0 && trade.status === 'completed').length || 0;
   const errorTrades = allSortedTrades?.filter(trade => trade.status === 'error').length || 0;
-  const totalCapitalUsed = allSortedTrades?.reduce((sum, trade) => sum + (trade.usdt_amount || 0), 0) || 0; // Nuevo cálculo
+  const totalCapitalUsed = allSortedTrades?.reduce((sum, trade) => sum + (trade.usdt_amount || 0), 0) || 0;
 
   const totalProfitLossColor = totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400';
   const TotalPnLIcon = totalProfitLoss >= 0 ? TrendingUp : TrendingDown;
+  const totalProfitLossPercentage = totalCapitalUsed > 0 ? (totalProfitLoss / totalCapitalUsed) * 100 : 0;
 
 
   if (isLoading) {
@@ -154,10 +155,13 @@ const TradeHistory = () => {
             <span className={`font-bold flex items-center ${totalProfitLossColor}`}>
               <TotalPnLIcon className="h-4 w-4 mr-1" />
               ${totalProfitLoss.toFixed(2)}
+              {totalCapitalUsed > 0 && (
+                <span className="ml-1 text-xs">({totalProfitLossPercentage.toFixed(2)}%)</span>
+              )}
             </span>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-700 rounded-md">
-            <span className="text-gray-300">Capital Usado Total:</span> {/* Nuevo campo */}
+            <span className="text-gray-300">Capital Usado Total:</span>
             <span className="font-bold text-white">${totalCapitalUsed.toFixed(2)}</span>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-700 rounded-md">
@@ -203,7 +207,7 @@ const TradeHistory = () => {
                   <TableHead className="text-white">Fecha Apertura</TableHead>
                   <TableHead className="text-white">Fecha Cierre</TableHead>
                   <TableHead className="text-white">Estado</TableHead>
-                  <TableHead className="text-white">Ganancia/Pérdida</TableHead> {/* Columna combinada */}
+                  <TableHead className="text-white">Ganancia/Pérdida</TableHead>
                   <TableHead className="text-white">Mensaje Error</TableHead>
                 </TableRow>
               </TableHeader>
