@@ -6,22 +6,31 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthProvider';
 
 const Login = () => {
-  const { session, isLoading } = useAuth(); // Obtener isLoading
+  const { session, isLoading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Solo redirigir si la carga ha terminado y hay una sesión
     if (!isLoading && session) {
       navigate('/');
     }
-  }, [session, isLoading, navigate]); // Añadir isLoading a las dependencias
+  }, [session, isLoading, navigate]);
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center">
       <div className="w-full max-w-md p-8 rounded-lg shadow-lg bg-gray-800 text-white">
         <Auth
           supabaseClient={supabase}
-          appearance={{ theme: ThemeSupa }}
+          appearance={{
+            theme: ThemeSupa,
+            variables: {
+              default: {
+                colors: {
+                  brand: 'hsl(47 96% 52%)', // Un amarillo vibrante
+                  brandAccent: 'hsl(47 96% 42%)', // Un amarillo ligeramente más oscuro para el hover/activo
+                },
+              },
+            },
+          }}
           providers={[]}
           theme="dark"
           localization={{
