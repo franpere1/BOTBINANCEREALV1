@@ -25,8 +25,8 @@ const Login = () => {
             variables: {
               default: {
                 colors: {
-                  brand: 'hsl(47 96% 52%)', // Un amarillo vibrante
-                  brandAccent: 'hsl(47 96% 42%)', // Un amarillo ligeramente más oscuro para el hover/activo
+                  brand: 'hsl(0 84.2% 60.2%)', // Un rojo vibrante
+                  brandAccent: 'hsl(0 72.2% 40.2%)', // Un rojo ligeramente más oscuro para el hover/activo
                 },
               },
             },
