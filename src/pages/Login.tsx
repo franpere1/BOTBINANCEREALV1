@@ -25,8 +25,8 @@ const Login = () => {
             variables: {
               default: {
                 colors: {
-                  brand: 'hsl(0 84.2% 60.2%)', // Fondo del botón principal en rojo (similar a destructive)
-                  brandAccent: 'hsl(0 72.2% 50.6%)', // Fondo del botón principal en hover/activo (un rojo más oscuro)
+                  brand: 'hsl(47.9 95.8% 53.1%)', // Fondo del botón principal en amarillo (similar a yellow-500)
+                  brandAccent: 'hsl(40 95.8% 45%)', // Fondo del botón principal en hover/activo (un amarillo más oscuro)
                   defaultButtonText: 'hsl(222.2 47.4% 11.2%)', // Texto de los botones por defecto en un color oscuro (gray-900)
                 },
               },
