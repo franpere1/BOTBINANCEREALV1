@@ -39,9 +39,9 @@ const Login = () => {
               sign_in: {
                 email_label: 'Correo electrónico',
                 password_label: 'Contraseña',
-                button_label: 'Iniciar sesión',
-                social_provider_text: 'Iniciar sesión con {{provider}}',
-                link_text: '¿Ya tienes una cuenta? Inicia sesión',
+                button_label: 'Acceder', // Cambiado de 'Iniciar sesión' a 'Acceder'
+                social_provider_text: 'Acceder con {{provider}}',
+                link_text: '¿Ya tienes una cuenta? Acceder', // Cambiado de 'Iniciar sesión' a 'Acceder'
               },
               sign_up: {
                 email_label: 'Correo electrónico',
