@@ -44,38 +44,30 @@ const fetchActiveTrades = async (userId: string, strategyType: 'manual' | 'strat
   return data;
 };
 
+// MODIFICADO: Ahora obtiene el precio directamente de la API pública de Binance
 const fetchTickerPrice = async (pair: string): Promise<number> => {
-  console.log(`[fetchTickerPrice] Fetching price for ${pair}`);
-  const { data, error: functionError } = await supabase.functions.invoke('get-ticker-price', {
-    body: { pair },
-  });
+  console.log(`[fetchTickerPrice] Fetching price for ${pair} directly from Binance API.`);
+  try {
+    const url = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
+    const response = await fetch(url);
+    const data = await response.json();
 
-  if (functionError) {
-    console.error(`[fetchTickerPrice] Error invoking get-ticker-price for ${pair}:`, functionError);
-    throw new Error(functionError.message || `Failed to invoke get-ticker-price for ${pair}`);
+    if (!response.ok) {
+      console.error(`[fetchTickerPrice] Binance API error for ${pair}: ${data.msg || 'Unknown error'}`, data);
+      throw new Error(data.msg || 'Error al obtener el precio desde Binance.');
+    }
+
+    const price = parseFloat(data.price);
+    if (isNaN(price)) {
+      console.error(`[fetchTickerPrice] Invalid price received for ${pair}: '${data.price}'`);
+      throw new Error(`Invalid price data for ${pair}: ${data.price}`);
+    }
+    console.log(`[fetchTickerPrice] Parsed price for ${pair}: ${price}`);
+    return price;
+  } catch (error: any) {
+    console.error(`[fetchTickerPrice] Error fetching price for ${pair}:`, error.message);
+    throw new Error(`Error al obtener el precio para ${pair}: ${error.message}`);
   }
-
-  // Check if the Edge Function itself returned an error in its body
-  if (data && typeof data === 'object' && 'error' in data) {
-    console.error(`[fetchTickerPrice] Edge Function returned error for ${pair}:`, data.error);
-    throw new Error(data.error as string || `Edge Function error for ${pair}`);
-  }
-
-  console.log(`[fetchTickerPrice] Raw data from Edge Function for ${pair}:`, data);
-
-  // Ensure data is an object and has a 'price' property
-  if (!data || typeof data !== 'object' || typeof data.price === 'undefined') {
-    console.warn(`[fetchTickerPrice] Unexpected data structure or missing price for ${pair}. Data:`, data);
-    throw new Error(`Unexpected price data received for ${pair}`);
-  }
-
-  const price = parseFloat(data.price);
-  if (isNaN(price)) {
-    console.error(`[fetchTickerPrice] Invalid price received for ${pair}: '${data.price}'`);
-    throw new Error(`Invalid price data for ${pair}: ${data.price}`);
-  }
-  console.log(`[fetchTickerPrice] Parsed price for ${pair}: ${price}`);
-  return price;
 };
 
 const editStrategicFormSchema = z.object({
