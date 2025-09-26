@@ -12,7 +12,8 @@ import MainLayout from "./components/MainLayout";
 import ManualTrading from "./pages/ManualTrading";
 import SignalsTrading from "./pages/SignalsTrading";
 import TradeHistory from "./pages/TradeHistory";
-import StrategicPurchases from "./pages/StrategicPurchases"; // Importar la nueva página
+import StrategicPurchases from "./pages/StrategicPurchases";
+import PumpFivePairs from "./pages/PumpFivePairs"; // Importar la nueva página
 
 const queryClient = new QueryClient();
 
@@ -37,7 +38,8 @@ const App = () => (
               <Route index element={<Index />} />
               <Route path="manual-trading" element={<ManualTrading />} />
               <Route path="signals-trading" element={<SignalsTrading />} />
-              <Route path="strategic-purchases" element={<StrategicPurchases />} /> {/* Nueva ruta */}
+              <Route path="strategic-purchases" element={<StrategicPurchases />} />
+              <Route path="pump-five-pares" element={<PumpFivePairs />} /> {/* Nueva ruta */}
               <Route path="trade-history" element={<TradeHistory />} />
             </Route>
 

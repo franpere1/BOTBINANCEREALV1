@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { showError, showSuccess } from '@/utils/toast';
-import { AlertCircle, Trash2, Edit } from 'lucide-react'; // Importar el icono Edit
+import { AlertCircle, Trash2, Edit } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
@@ -16,88 +16,69 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 
-interface SignalTrade {
+interface PumpTrade {
   id: string;
   pair: string;
   usdt_amount: number;
-  asset_amount: number | null; // Puede ser null si está awaiting_buy_signal
-  purchase_price: number | null; // Puede ser null si está awaiting_buy_signal
-  target_price: number | null; // Puede ser null si está awaiting_buy_signal
-  stop_loss_price: number | null; // Nuevo: Stop Loss
+  asset_amount: number | null;
+  purchase_price: number | null;
+  target_price: number | null;
   take_profit_percentage: number;
   created_at: string;
-  status: 'active' | 'paused' | 'completed' | 'error' | 'awaiting_buy_signal' | 'pending'; // Nuevo estado 'pending'
-  strategy_type: string; // Nuevo: para diferenciar estrategias
+  status: 'active' | 'pending' | 'error'; // 'pending' si está esperando condiciones de entrada
+  strategy_type: 'pump_five_pairs'; // Tipo específico para esta estrategia
+  error_message: string | null;
 }
 
-const fetchActiveSignalTrades = async (userId: string) => {
+const fetchActivePumpTrades = async (userId: string) => {
   const { data, error } = await supabase
-    .from('signal_trades')
+    .from('signal_trades') // Reutilizamos signal_trades
     .select('*')
     .eq('user_id', userId)
-    .eq('strategy_type', 'ml_signal') // Filtrar solo por 'ml_signal'
-    .in('status', ['active', 'paused', 'awaiting_buy_signal']) // Incluir también operaciones pausadas y esperando señal
+    .eq('strategy_type', 'pump_five_pairs') // Filtrar por el nuevo strategy_type
+    .in('status', ['active', 'pending']) // 'pending' si está esperando condiciones de entrada
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data;
 };
 
-// MODIFICADO: Ahora obtiene el precio directamente de la API pública de Binance
 const fetchTickerPrice = async (pair: string): Promise<number> => {
-  console.log(`[fetchTickerPrice] Fetching price for ${pair} directly from Binance API.`);
   try {
     const url = `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`;
     const response = await fetch(url);
     const data = await response.json();
 
     if (!response.ok) {
-      console.error(`[fetchTickerPrice] Binance API error for ${pair}: ${data.msg || 'Unknown error'}`, data);
       throw new Error(data.msg || 'Error al obtener el precio desde Binance.');
     }
-
-    const price = parseFloat(data.price);
-    if (isNaN(price)) {
-      console.error(`[fetchTickerPrice] Invalid price received for ${pair}: '${data.price}'`);
-      throw new Error(`Invalid price data for ${pair}: ${data.price}`);
-    }
-    console.log(`[fetchTickerPrice] Parsed price for ${pair}: ${price}`);
-    return price;
+    return parseFloat(data.price);
   } catch (error: any) {
-    console.error(`[fetchTickerPrice] Error fetching price for ${pair}:`, error.message);
+    console.error(`Error fetching price for ${pair}:`, error.message);
     throw new Error(`Error al obtener el precio para ${pair}: ${error.message}`);
   }
 };
 
 const editFormSchema = z.object({
-  usdtAmount: z.coerce.number().positive("La cantidad debe ser mayor que 0."),
   takeProfitPercentage: z.coerce.number().positive("El porcentaje debe ser mayor que 0."),
 });
 
-const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
+const ActivePumpTradeRow = ({ trade }: { trade: PumpTrade }) => {
   const queryClient = useQueryClient();
-  const [isActionLoading, setIsActionLoading] = useState(false); // Para el estado de carga del botón de acción
+  const [isActionLoading, setIsActionLoading] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
-  const isAwaitingSignal = trade.status === 'awaiting_buy_signal';
+  const isPendingEntry = trade.status === 'pending';
 
   const { data: currentPrice, isLoading: isLoadingPrice, isError: isPriceError } = useQuery<number, Error>({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
-    enabled: true, // Siempre cargar el precio actual
-    refetchInterval: 5000, // Consultar el precio cada 5 segundos
+    enabled: true,
+    refetchInterval: 5000,
   });
-
-  React.useEffect(() => {
-    console.log(`[ActiveSignalTradeRow - ${trade.pair}] currentPrice:`, currentPrice);
-    console.log(`[ActiveSignalTradeRow - ${trade.pair}] isLoadingPrice:`, isLoadingPrice);
-    console.log(`[ActiveSignalTradeRow - ${trade.pair}] isPriceError:`, isPriceError);
-    console.log(`[ActiveSignalTradeRow - ${trade.pair}] isAwaitingSignal:`, isAwaitingSignal);
-  }, [currentPrice, isLoadingPrice, isPriceError, isAwaitingSignal, trade.pair]);
 
   const editForm = useForm<z.infer<typeof editFormSchema>>({
     resolver: zodResolver(editFormSchema),
     defaultValues: {
-      usdtAmount: trade.usdt_amount,
       takeProfitPercentage: trade.take_profit_percentage,
     },
   });
@@ -105,23 +86,23 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const handleEditSubmit = async (values: z.infer<typeof editFormSchema>) => {
     setIsActionLoading(true);
     try {
-      const { data, error: functionError } = await supabase.functions.invoke('update-signal-trade', {
+      const { data, error: functionError } = await supabase.functions.invoke('update-signal-trade', { // Reutilizamos update-signal-trade
         body: {
           tradeId: trade.id,
-          usdtAmount: values.usdtAmount,
           takeProfitPercentage: values.takeProfitPercentage,
+          // usdtAmount no se puede cambiar si ya está activa, y si está pendiente, se cambia en la configuración global
         },
       });
 
       if (functionError) throw functionError;
       if (data.error) throw new Error(data.error);
 
-      showSuccess(`Monitoreo de ${trade.pair} actualizado con éxito.`);
-      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
-      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
+      showSuccess(`Operación de ${trade.pair} actualizada con éxito.`);
+      queryClient.invalidateQueries({ queryKey: ['activePumpTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
       setIsEditDialogOpen(false);
     } catch (error: any) {
-      showError(`Error al actualizar el monitoreo de ${trade.pair}: ${error.message}`);
+      showError(`Error al actualizar la operación de ${trade.pair}: ${error.message}`);
     } finally {
       setIsActionLoading(false);
     }
@@ -130,37 +111,34 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const handleDeleteOrClose = async () => {
     setIsActionLoading(true);
     try {
-      if (isAwaitingSignal) {
-        // Eliminar monitoreo
-        const { data, error: functionError } = await supabase.functions.invoke('delete-signal-trade', {
+      if (isPendingEntry) {
+        // Eliminar la operación pendiente
+        const { data, error: functionError } = await supabase.functions.invoke('delete-signal-trade', { // Reutilizamos delete-signal-trade
           body: { tradeId: trade.id },
         });
         if (functionError) throw functionError;
         
-        // Verificar si la función Edge devolvió un error en el cuerpo (binanceError)
         if (data.binanceError) {
-          showError(`Monitoreo de ${trade.pair} eliminado, pero hubo un error al intentar vender activos en Binance: ${data.binanceError}`);
+          showError(`Operación de ${trade.pair} eliminada, pero hubo un error al intentar vender activos en Binance: ${data.binanceError}`);
         } else {
-          showSuccess(`Monitoreo de ${trade.pair} eliminado con éxito.`);
+          showSuccess(`Operación de ${trade.pair} eliminada con éxito.`);
         }
       } else {
-        // Cerrar trade (activo o pausado)
+        // Cerrar trade activo
         const { data, error: functionError } = await supabase.functions.invoke('close-trade', {
-          body: { tradeId: trade.id, tradeType: 'signal' },
+          body: { tradeId: trade.id, tradeType: 'signal' }, // Usamos 'signal' como tipo genérico para signal_trades
         });
         if (functionError) throw functionError;
         
-        // Verificar si la función Edge devolvió un error en el cuerpo (binanceError)
         if (data.binanceError) {
           showError(`Operación de ${trade.pair} marcada como completada, pero hubo un error al vender activos en Binance: ${data.binanceError}`);
         } else {
           showSuccess(`Operación de ${trade.pair} cerrada con éxito.`);
         }
       }
-      queryClient.invalidateQueries({ queryKey: ['activeSignalTrades'] });
-      queryClient.invalidateQueries({ queryKey: ['userSignalTrades'] });
+      queryClient.invalidateQueries({ queryKey: ['activePumpTrades'] });
       queryClient.invalidateQueries({ queryKey: ['binanceAccountSummary'] });
-      queryClient.invalidateQueries({ queryKey: ['completedTrades'] }); // Invalidar historial para que aparezca
+      queryClient.invalidateQueries({ queryKey: ['completedTrades'] });
     } catch (error: any) {
       showError(`Error al procesar la acción para ${trade.pair}: ${error.message}`);
     } finally {
@@ -168,7 +146,6 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
     }
   };
 
-  // Calcular PnL de forma segura
   const pnl = (typeof currentPrice === 'number' && typeof trade.purchase_price === 'number')
     ? ((currentPrice - trade.purchase_price) / trade.purchase_price) * 100
     : 0;
@@ -181,7 +158,6 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       <TableCell className="text-gray-300">{new Date(trade.created_at).toLocaleString()}</TableCell>
       <TableCell className="text-gray-300">{trade.purchase_price?.toFixed(4) || 'N/A'}</TableCell>
       <TableCell className="text-yellow-400">{trade.target_price?.toFixed(4) || 'N/A'}</TableCell>
-      <TableCell className="text-red-400">{trade.stop_loss_price?.toFixed(4) || 'N/A'}</TableCell> {/* Mostrar SL */}
       <TableCell className="text-gray-300">{trade.take_profit_percentage.toFixed(2)}%</TableCell>
       <TableCell className="text-white">
         {isLoadingPrice ? (
@@ -197,7 +173,7 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
           <Skeleton className="h-4 w-16" />
         ) : isPriceError ? (
           <span className="text-red-400">Error</span>
-        ) : isAwaitingSignal ? (
+        ) : isPendingEntry ? (
           'N/A'
         ) : (
           typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A'
@@ -205,13 +181,19 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       </TableCell>
       <TableCell className={`font-bold ${
         trade.status === 'active' ? 'text-green-400' : 
-        trade.status === 'paused' ? 'text-yellow-400' :
-        'text-blue-400' // Color para awaiting_buy_signal
+        trade.status === 'pending' ? 'text-blue-400' :
+        'text-red-400' // 'error'
       }`}>
-        {trade.status === 'active' ? 'Activa' : trade.status === 'paused' ? 'Pausada' : 'Esperando Señal'}
+        {trade.status === 'active' ? 'Activa' : trade.status === 'pending' ? 'Pendiente' : 'Error'}
+        {trade.error_message && (
+            <div className="flex items-center text-red-400 text-xs mt-1">
+              <AlertCircle className="h-3 w-3 mr-1" />
+              {trade.error_message}
+            </div>
+          )}
       </TableCell>
       <TableCell className="text-right flex items-center justify-end space-x-2">
-        {isAwaitingSignal && (
+        {!isPendingEntry && ( // Solo permitir editar TP si la operación está activa
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" disabled={isActionLoading} className="text-gray-300 border-gray-600 hover:bg-gray-700">
@@ -220,26 +202,13 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
               <DialogHeader>
-                <DialogTitle className="text-yellow-400">Editar Monitoreo de {trade.pair}</DialogTitle>
+                <DialogTitle className="text-yellow-400">Editar Operación de {trade.pair}</DialogTitle>
                 <DialogDescription className="text-gray-400">
-                  Actualiza la cantidad de USDT a invertir y el porcentaje de ganancia objetivo para este monitoreo.
+                  Actualiza el porcentaje de ganancia objetivo para esta operación.
                 </DialogDescription>
               </DialogHeader>
               <Form {...editForm}>
                 <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="grid gap-4 py-4">
-                  <FormField
-                    control={editForm.control}
-                    name="usdtAmount"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-gray-300">Cantidad (USDT)</FormLabel>
-                        <FormControl>
-                          <Input type="number" step="0.01" {...field} className="bg-gray-700 border-gray-600 text-white" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                   <FormField
                     control={editForm.control}
                     name="takeProfitPercentage"
@@ -268,18 +237,22 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
         )}
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="destructive" size="sm" disabled={isActionLoading}>
+            <Button 
+              variant="destructive" 
+              size="sm" 
+              disabled={isActionLoading}
+            >
               {isActionLoading ? 'Cargando...' : <Trash2 className="h-4 w-4" />}
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px] bg-gray-800 text-white border-gray-700">
             <DialogHeader>
               <DialogTitle className="text-red-400">
-                {isAwaitingSignal ? 'Confirmar Eliminación de Monitoreo' : 'Confirmar Cierre de Operación'}
+                {isPendingEntry ? 'Confirmar Eliminación de Operación Pendiente' : 'Confirmar Cierre de Operación'}
               </DialogTitle>
               <DialogDescription className="text-gray-400">
-                {isAwaitingSignal
-                  ? `¿Estás seguro de que quieres eliminar el monitoreo para ${trade.pair}? Esto detendrá la búsqueda de señales de compra para este activo.`
+                {isPendingEntry
+                  ? `¿Estás seguro de que quieres eliminar esta operación pendiente para ${trade.pair}? Esto detendrá la búsqueda de entrada para este activo.`
                   : `¿Estás seguro de que quieres cerrar la operación de ${trade.pair}? Si la operación está activa, se intentarán vender los activos restantes en Binance.`
                 }
               </DialogDescription>
@@ -291,7 +264,7 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
               <Button variant="destructive" onClick={handleDeleteOrClose} disabled={isActionLoading}>
                 {isActionLoading 
                   ? 'Procesando...' 
-                  : (isAwaitingSignal ? 'Eliminar Monitoreo' : 'Cerrar Trade')
+                  : (isPendingEntry ? 'Eliminar Pendiente' : 'Cerrar Trade')
                 }
               </Button>
             </DialogFooter>
@@ -302,13 +275,13 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   );
 };
 
-const ActiveSignalTrades = () => {
+const ActivePumpFivePairsTrades = () => {
   const { user } = useAuth();
   const { data: trades, isLoading, isError } = useQuery({
-    queryKey: ['activeSignalTrades'],
-    queryFn: () => fetchActiveSignalTrades(user!.id),
+    queryKey: ['activePumpTrades'],
+    queryFn: () => fetchActivePumpTrades(user!.id),
     enabled: !!user,
-    refetchInterval: 10000, // Refrescar la lista de trades activos cada 10 segundos
+    refetchInterval: 10000,
   });
 
   if (isLoading) {
@@ -326,39 +299,40 @@ const ActiveSignalTrades = () => {
         <AlertCircle className="h-6 w-6 text-red-400 mr-4 flex-shrink-0" />
         <div>
           <h4 className="font-bold text-red-300">Error</h4>
-          <p className="text-sm text-red-400 mt-1">Error al cargar las operaciones de señales activas.</p>
+          <p className="text-sm text-red-400 mt-1">Error al cargar las operaciones de 'Pump 5 Pares' activas.</p>
         </div>
       </div>
     );
   }
 
   if (!trades || trades.length === 0) {
-    return <p className="text-center text-gray-400">No tienes operaciones de señales activas o en monitoreo en este momento.</p>;
+    return <p className="text-center text-gray-400">No tienes operaciones de 'Pump 5 Pares' activas o pendientes en este momento.</p>;
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="border-gray-700 hover:bg-gray-800">
-          <TableHead className="text-white">Par</TableHead>
-          <TableHead className="text-white">Fecha Apertura</TableHead>
-          <TableHead className="text-white">Precio Compra</TableHead>
-          <TableHead className="text-white">Precio Objetivo</TableHead>
-          <TableHead className="text-white">Stop Loss</TableHead> {/* Nueva columna */}
-          <TableHead className="text-white">Objetivo (%)</TableHead>
-          <TableHead className="text-white">Precio Actual</TableHead>
-          <TableHead className="text-white">Ganancia/Pérdida</TableHead>
-          <TableHead className="text-white">Estado</TableHead>
-          <TableHead className="text-right text-white">Acción</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {trades.map((trade) => (
-          <ActiveSignalTradeRow key={trade.id} trade={trade} />
-        ))}
-      </TableBody>
-    </Table>
+    <div className="overflow-x-auto"> 
+      <Table>
+        <TableHeader>
+          <TableRow className="border-gray-700 hover:bg-gray-800">
+            <TableHead className="text-white">Par</TableHead>
+            <TableHead className="text-white">Fecha Apertura</TableHead>
+            <TableHead className="text-white">Precio Compra</TableHead>
+            <TableHead className="text-white">Precio Objetivo</TableHead>
+            <TableHead className="text-white">Objetivo (%)</TableHead>
+            <TableHead className="text-white min-w-[80px]">Precio Actual</TableHead>
+            <TableHead className="text-white">Ganancia/Pérdida</TableHead>
+            <TableHead className="text-white">Estado</TableHead>
+            <TableHead className="text-right text-white">Acción</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {trades.map((trade) => (
+            <ActivePumpTradeRow key={trade.id} trade={trade} />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 };
 
-export default ActiveSignalTrades;
+export default ActivePumpFivePairsTrades;

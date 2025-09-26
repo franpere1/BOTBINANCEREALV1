@@ -52,7 +52,7 @@ serve(async (req) => {
     // 1. Obtener los detalles de la operación
     const { data: trade, error: fetchTradeError } = await supabaseAdmin
       .from('signal_trades')
-      .select('pair, asset_amount, status')
+      .select('pair, asset_amount, status, strategy_type') // Añadir strategy_type
       .eq('id', tradeId)
       .eq('user_id', user.id) // Asegurar que el usuario es dueño de la operación
       .single();
@@ -154,8 +154,8 @@ serve(async (req) => {
         console.warn(`[${functionName}] ${binanceErrorMessage}`);
         shouldAttemptBinanceSell = false;
       }
-    } else if (trade.status === 'awaiting_buy_signal') {
-      console.log(`[${functionName}] Trade ${tradeId} está esperando una señal de compra. No hay activos para vender.`);
+    } else if (trade.status === 'awaiting_buy_signal' || trade.status === 'pending') { // Incluir 'pending'
+      console.log(`[${functionName}] Trade ${tradeId} está esperando una señal de compra o pendiente. No hay activos para vender.`);
       shouldAttemptBinanceSell = false;
     }
 
@@ -192,7 +192,7 @@ serve(async (req) => {
       .from('signal_trades')
       .delete()
       .eq('id', tradeId)
-      .eq('user.id', user.id); // Asegurar que el usuario es dueño de la operación
+      .eq('user_id', user.id); // Asegurar que el usuario es dueño de la operación
 
     if (deleteError) {
       throw new Error(`Error al eliminar la operación de DB: ${deleteError.message}`);

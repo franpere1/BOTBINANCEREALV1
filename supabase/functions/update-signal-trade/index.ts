@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient }
+  from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
 
 // Inlined from _utils/binance-helpers.ts
@@ -46,12 +47,13 @@ serve(async (req) => {
       take_profit_percentage?: number;
       target_price?: number | null; // Puede ser null si no hay purchase_price
       status?: string;
+      stop_loss_price?: number | null; // Nuevo: para actualizar SL
     } = {};
 
     // Obtener el trade actual para verificar el estado y purchase_price
     const { data: existingTrade, error: fetchTradeError } = await supabaseAdmin
       .from('signal_trades')
-      .select('purchase_price, status')
+      .select('purchase_price, status, strategy_type, stop_loss_price') // Añadir strategy_type y stop_loss_price
       .eq('id', tradeId)
       .eq('user_id', user.id)
       .single();
@@ -60,16 +62,18 @@ serve(async (req) => {
       throw new Error(`Operación no encontrada o no autorizada: ${fetchTradeError?.message || 'desconocido'}`);
     }
 
-    // Solo permitir la edición de usdtAmount y takeProfitPercentage si el trade está en 'awaiting_buy_signal'
-    if (existingTrade.status === 'awaiting_buy_signal') {
+    // Solo permitir la edición de usdtAmount y takeProfitPercentage si el trade está en 'awaiting_buy_signal' o 'pending'
+    if (existingTrade.status === 'awaiting_buy_signal' || existingTrade.status === 'pending') {
       if (usdtAmount !== undefined) {
         updatePayload.usdt_amount = usdtAmount;
       }
       if (takeProfitPercentage !== undefined) {
         updatePayload.take_profit_percentage = takeProfitPercentage;
-        // Si no hay purchase_price (está awaiting_buy_signal), target_price debe ser null
+        // Si no hay purchase_price (está awaiting_buy_signal/pending), target_price debe ser null
         updatePayload.target_price = null; 
       }
+      // Si está pendiente, el SL también es nulo
+      updatePayload.stop_loss_price = null;
     } else if (existingTrade.status === 'active' || existingTrade.status === 'paused') {
       // Si el trade está activo o pausado, solo se puede actualizar takeProfitPercentage y recalcular target_price
       if (takeProfitPercentage !== undefined) {
@@ -81,6 +85,10 @@ serve(async (req) => {
 
         updatePayload.take_profit_percentage = takeProfitPercentage;
         updatePayload.target_price = newTargetPrice;
+
+        // Recalcular SL si es necesario, o mantener el existente si no se proporciona uno nuevo
+        // Para la estrategia 'Pump 5 Pares', el SL es fijo al 1% de la compra, no se edita aquí.
+        // Si se quisiera editar, se añadiría lógica aquí.
       }
     } else {
       // Para otros estados, no permitir edición de estos campos
@@ -91,8 +99,8 @@ serve(async (req) => {
 
     // Si se proporciona status, actualizarlo (esto es independiente de los otros campos)
     if (status !== undefined) {
-      if (!['active', 'paused', 'completed', 'error', 'awaiting_buy_signal'].includes(status)) {
-        throw new Error('Estado inválido. Los estados permitidos son: active, paused, completed, error, awaiting_buy_signal.');
+      if (!['active', 'paused', 'completed', 'error', 'awaiting_buy_signal', 'pending'].includes(status)) { // Añadir 'pending'
+        throw new Error('Estado inválido. Los estados permitidos son: active, paused, completed, error, awaiting_buy_signal, pending.');
       }
       updatePayload.status = status;
     }

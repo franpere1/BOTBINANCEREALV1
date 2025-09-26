@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
+import MobileSidebar from './MobileSidebar'; // Importar MobileSidebar
 
 const MainLayout = () => {
   return (

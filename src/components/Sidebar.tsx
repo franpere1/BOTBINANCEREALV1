@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Hand, Signal, Home, History, DollarSign } from 'lucide-react'; // Importar DollarSign para el nuevo icono
+import { Hand, Signal, Home, History, DollarSign, Rocket } from 'lucide-react'; // Importar Rocket para el nuevo icono
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
@@ -69,6 +69,21 @@ const Sidebar = ({ onLinkClick }: SidebarProps) => {
           >
             <DollarSign className="mr-3 h-5 w-5" />
             Compras Estratégicas
+          </NavLink>
+        </li>
+        <li>
+          <NavLink
+            to="/pump-five-pares"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center p-2 rounded-md hover:bg-gray-700 transition-colors font-medium",
+                isActive ? "bg-yellow-500 text-gray-900" : "text-gray-300"
+              )
+            }
+            onClick={onLinkClick}
+          >
+            <Rocket className="mr-3 h-5 w-5" />
+            Pump 5 Pares
           </NavLink>
         </li>
         <li>

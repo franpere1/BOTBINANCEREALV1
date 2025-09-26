@@ -46,8 +46,8 @@ serve(async (req) => {
     // 2. Obtener todas las operaciones de señales activas Y las que están esperando señal de compra
     const { data: signalTrades, error: signalTradesError } = await supabaseAdmin
       .from('signal_trades')
-      .select('id, user_id, pair, usdt_amount, asset_amount, purchase_price, take_profit_percentage, target_price, status')
-      .in('status', ['active', 'paused', 'awaiting_buy_signal']); // Incluir el nuevo estado
+      .select('id, user_id, pair, usdt_amount, asset_amount, purchase_price, take_profit_percentage, target_price, status, strategy_type, stop_loss_price') // Añadir strategy_type y stop_loss_price
+      .in('status', ['active', 'paused', 'awaiting_buy_signal', 'pending']); // Incluir 'pending' para Pump 5 Pares
 
     if (signalTradesError) {
       console.error(`[${functionName}] Error fetching active/awaiting signal trades:`, signalTradesError);
@@ -64,9 +64,10 @@ serve(async (req) => {
     console.log(`[${functionName}] Monitoring ${allTrades.length} active/awaiting trades.`);
 
     for (const trade of allTrades) {
-      console.log(`[${functionName}] Processing trade ${trade.id} (${trade.pair}), current status: ${trade.status}`);
+      console.log(`[${functionName}] Processing trade ${trade.id} (${trade.pair}), current status: ${trade.status}, strategy: ${(trade as any).strategy_type || 'N/A'}`);
       try {
         const tableName = (trade as any).strategy_type ? 'manual_trades' : (manualTrades?.some(t => t.id === trade.id) ? 'manual_trades' : 'signal_trades');
+        const tradeStrategyType = (trade as any).strategy_type || 'ml_signal'; // Default para signal_trades antiguas
 
         // Obtener las claves de API del usuario para esta operación
         const { data: keys, error: keysError } = await supabaseAdmin
@@ -87,7 +88,7 @@ serve(async (req) => {
         const { api_key, api_secret } = keys;
 
         // --- INICIO: Verificación de saldo USDT antes de cualquier compra ---
-        if (trade.status === 'awaiting_dip_signal' || trade.status === 'awaiting_buy_signal') {
+        if (trade.status === 'awaiting_dip_signal' || trade.status === 'awaiting_buy_signal' || trade.status === 'pending') {
           const timestamp = Date.now();
           const accountQueryString = `timestamp=${timestamp}`;
           const accountSignature = new HmacSha256(api_secret).update(accountQueryString).toString();
@@ -348,10 +349,14 @@ serve(async (req) => {
           }
           const currentPrice = parseFloat(tickerData.price);
 
-          console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}): Current Price = ${currentPrice}, Target Price = ${trade.target_price}`);
+          console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}): Current Price = ${currentPrice}, Target Price = ${trade.target_price}, Stop Loss Price = ${(trade as any).stop_loss_price}`);
 
-          if (currentPrice >= trade.target_price) {
-            console.log(`[${functionName}] Target price reached for trade ${trade.id}. Executing sell order.`);
+          // Verificar si se alcanzó el Take Profit o el Stop Loss
+          const targetReached = currentPrice >= trade.target_price;
+          const stopLossReached = (trade as any).stop_loss_price && currentPrice <= (trade as any).stop_loss_price;
+
+          if (targetReached || stopLossReached) {
+            console.log(`[${functionName}] ${targetReached ? 'Target price reached' : 'Stop loss reached'} for trade ${trade.id}. Executing sell order.`);
 
             // Obtener información de intercambio para precisión y límites
             const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${trade.pair}`;
@@ -513,27 +518,39 @@ serve(async (req) => {
               }
               console.log(`[${functionName}] Manual trade ${trade.id} completed successfully.`);
             } else { // tableName === 'signal_trades'
+              const updatePayload: any = {
+                binance_order_id_sell: binanceSellOrderId,
+                completed_at: new Date().toISOString(), // Mantener el registro de cuándo se completó el ciclo
+                error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
+                sell_price: actualSellPriceInMonitor, // Nuevo: Guardar el precio de venta
+                profit_loss_usdt: profitLossUsdtInMonitor, // Guardar la ganancia/pérdida en USDT
+              };
+
+              if (tradeStrategyType === 'pump_five_pairs') {
+                // Para 'Pump 5 Pares', la operación se considera completada y no se reinicia automáticamente.
+                // La estrategia buscará nuevas entradas en el siguiente ciclo horario.
+                updatePayload.status = 'completed';
+                console.log(`[${functionName}] 'Pump 5 Pares' trade ${trade.id} completed.`);
+              } else { // Default para 'ml_signal'
+                updatePayload.status = 'awaiting_buy_signal'; // Reiniciar para monitoreo recurrente
+                updatePayload.asset_amount = null;
+                updatePayload.purchase_price = null;
+                updatePayload.target_price = null;
+                updatePayload.binance_order_id_buy = null;
+                updatePayload.stop_loss_price = null; // Limpiar SL al reiniciar
+                updatePayload.entry_reason = null; // Limpiar razón de entrada
+                // created_at se mantiene para saber cuándo se inició el monitoreo original
+                console.log(`[${functionName}] Signal trade ${trade.id} completed and reset to 'awaiting_buy_signal' for recurrence.`);
+              }
+
               const { error: updateSignalError } = await supabaseAdmin
                 .from(tableName)
-                .update({
-                  status: 'awaiting_buy_signal', // Reiniciar para monitoreo recurrente
-                  binance_order_id_sell: binanceSellOrderId,
-                  completed_at: new Date().toISOString(), // Mantener el registro de cuándo se completó el ciclo
-                  asset_amount: null,
-                  purchase_price: null,
-                  target_price: null,
-                  binance_order_id_buy: null,
-                  error_message: binanceErrorMessageInMonitor, // Almacenar el error si lo hubo
-                  sell_price: actualSellPriceInMonitor, // Nuevo: Guardar el precio de venta
-                  profit_loss_usdt: profitLossUsdtInMonitor, // Guardar la ganancia/pérdida en USDT
-                  // created_at se mantiene para saber cuándo se inició el monitoreo original
-                })
+                .update(updatePayload)
                 .eq('id', trade.id);
               if (updateSignalError) {
-                console.error(`[${functionName}] Error updating signal trade ${trade.id} to 'awaiting_buy_signal' status:`, updateSignalError);
-                throw new Error(`Error al actualizar la operación de señal a esperando compra en DB: ${updateSignalError.message}`);
+                console.error(`[${functionName}] Error updating signal trade ${trade.id} status:`, updateSignalError);
+                throw new Error(`Error al actualizar la operación de señal en DB: ${updateSignalError.message}`);
               }
-              console.log(`[${functionName}] Signal trade ${trade.id} completed and reset to 'awaiting_buy_signal' for recurrence.`);
             }
           }
         }

@@ -45,9 +45,11 @@ interface SignalTrade {
   asset_amount: number | null;
   purchase_price: number | null;
   target_price: number | null;
+  stop_loss_price: number | null; // Nuevo: Stop Loss
   take_profit_percentage: number;
   created_at: string;
-  status: 'active' | 'paused' | 'completed' | 'error' | 'awaiting_buy_signal';
+  status: 'active' | 'paused' | 'completed' | 'error' | 'awaiting_buy_signal' | 'pending'; // Nuevo estado 'pending'
+  strategy_type: string; // Nuevo: para diferenciar estrategias
 }
 
 const formSchema = z.object({
@@ -67,6 +69,7 @@ const fetchUserSignalTrades = async (userId: string) => {
     .from('signal_trades')
     .select('*')
     .eq('user_id', userId)
+    .eq('strategy_type', 'ml_signal') // Filtrar solo por 'ml_signal'
     .in('status', ['active', 'paused', 'awaiting_buy_signal'])
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
