@@ -1,12 +1,12 @@
 import ApiConfig from "@/components/ApiConfig";
 import BalanceDisplay from "@/components/BalanceDisplay";
-// import HourlyPriceMonitor from "@/components/HourlyPriceMonitor"; // Importar el nuevo componente
+import MarketAdvisor from "@/components/MarketAdvisor"; // Importar el nuevo componente
 
 const Index = () => {
   return (
     <div className="flex flex-col items-center">
       <div className="text-center mb-8">
-          <h2 className="text-4xl font-bold mb-4">
+          <h2 className="text-4xl font-bold mb-4 text-yellow-400">
             Bienvenido a Trade Binance
           </h2>
           <p className="text-xl text-gray-400 max-w-2xl">
@@ -15,9 +15,9 @@ const Index = () => {
       </div>
       
       <div className="w-full space-y-8">
+        <MarketAdvisor /> {/* Integrar el Asesor de Mercado aquí */}
         <ApiConfig />
         <BalanceDisplay />
-        {/* <HourlyPriceMonitor /> */}
       </div>
     </div>
   );
