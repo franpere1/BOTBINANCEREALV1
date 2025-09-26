@@ -82,7 +82,7 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const { data: currentPrice, isLoading: isLoadingPrice, isError: isPriceError } = useQuery<number, Error>({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
-    enabled: !isAwaitingSignal, // Solo cargar precio si no está esperando señal
+    enabled: true, // Siempre cargar el precio actual
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
 
@@ -184,17 +184,21 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       <TableCell className="text-white">
         {isLoadingPrice ? (
           <Skeleton className="h-4 w-16" />
-        ) : isAwaitingSignal || isPriceError ? (
-          'N/A'
+        ) : isPriceError ? (
+          <span className="text-red-400">Error</span>
         ) : (
-          // Asegurarse de que currentPrice es un número antes de llamar a toFixed
-          typeof currentPrice === 'number' ? currentPrice.toFixed(4) : (console.error(`[ActiveSignalTradeRow] currentPrice is not a number when expected: ${currentPrice}`), 'N/A')
+          typeof currentPrice === 'number' ? currentPrice.toFixed(4) : 'N/A'
         )}
       </TableCell>
       <TableCell className={pnlColor}>
-        {isAwaitingSignal || isPriceError ? 'N/A' : (
-          // Asegurarse de que currentPrice es un número antes de calcular PnL y llamar a toFixed
-          typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : (console.error(`[ActiveSignalTradeRow] currentPrice is not a number for PnL when expected: ${currentPrice}`), 'N/A')
+        {isLoadingPrice ? (
+          <Skeleton className="h-4 w-16" />
+        ) : isPriceError ? (
+          <span className="text-red-400">Error</span>
+        ) : isAwaitingSignal ? (
+          'N/A'
+        ) : (
+          typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A'
         )}
       </TableCell>
       <TableCell className={`font-bold ${
