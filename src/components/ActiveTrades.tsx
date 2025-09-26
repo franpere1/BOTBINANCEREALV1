@@ -46,13 +46,19 @@ const fetchActiveTrades = async (userId: string, strategyType: 'manual' | 'strat
 
 const fetchTickerPrice = async (pair: string): Promise<number> => {
   console.log(`[fetchTickerPrice] Fetching price for ${pair}`);
-  const { data, error } = await supabase.functions.invoke('get-ticker-price', {
+  const { data, error: functionError } = await supabase.functions.invoke('get-ticker-price', {
     body: { pair },
   });
 
-  if (error) {
-    console.error(`[fetchTickerPrice] Error invoking get-ticker-price for ${pair}:`, error);
-    throw new Error(data?.error || error.message || `Failed to fetch ticker price for ${pair}`);
+  if (functionError) {
+    console.error(`[fetchTickerPrice] Error invoking get-ticker-price for ${pair}:`, functionError);
+    throw new Error(functionError.message || `Failed to invoke get-ticker-price for ${pair}`);
+  }
+
+  // Check if the Edge Function itself returned an error in its body
+  if (data && typeof data === 'object' && 'error' in data) {
+    console.error(`[fetchTickerPrice] Edge Function returned error for ${pair}:`, data.error);
+    throw new Error(data.error as string || `Edge Function error for ${pair}`);
   }
 
   console.log(`[fetchTickerPrice] Raw data from Edge Function for ${pair}:`, data);
