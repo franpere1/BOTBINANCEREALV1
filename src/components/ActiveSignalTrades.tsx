@@ -39,7 +39,7 @@ const fetchActiveSignalTrades = async (userId: string) => {
   return data;
 };
 
-const fetchTickerPrice = async (pair: string) => {
+const fetchTickerPrice = async (pair: string): Promise<number> => {
   console.log(`[fetchTickerPrice] Fetching price for ${pair}`);
   const { data, error } = await supabase.functions.invoke('get-ticker-price', {
     body: { pair },
@@ -50,11 +50,12 @@ const fetchTickerPrice = async (pair: string) => {
     throw new Error(data?.error || error.message || `Failed to fetch ticker price for ${pair}`);
   }
 
-  console.log(`[fetchTickerPrice] Raw data for ${pair}:`, data);
+  console.log(`[fetchTickerPrice] Raw data from Edge Function for ${pair}:`, data);
 
-  if (!data || typeof data.price === 'undefined') {
-    console.warn(`[fetchTickerPrice] No price data or undefined price for ${pair}. Data:`, data);
-    throw new Error(`No price data received for ${pair}`);
+  // Ensure data is an object and has a 'price' property
+  if (!data || typeof data !== 'object' || typeof data.price === 'undefined') {
+    console.warn(`[fetchTickerPrice] Unexpected data structure or missing price for ${pair}. Data:`, data);
+    throw new Error(`Unexpected price data received for ${pair}`);
   }
 
   const price = parseFloat(data.price);
@@ -78,12 +79,19 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
 
   const isAwaitingSignal = trade.status === 'awaiting_buy_signal';
 
-  const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
+  const { data: currentPrice, isLoading: isLoadingPrice, isError: isPriceError } = useQuery<number, Error>({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
     enabled: !isAwaitingSignal, // Solo cargar precio si no está esperando señal
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
+
+  React.useEffect(() => {
+    console.log(`[ActiveSignalTradeRow - ${trade.pair}] currentPrice:`, currentPrice);
+    console.log(`[ActiveSignalTradeRow - ${trade.pair}] isLoadingPrice:`, isLoadingPrice);
+    console.log(`[ActiveSignalTradeRow - ${trade.pair}] isPriceError:`, isPriceError);
+    console.log(`[ActiveSignalTradeRow - ${trade.pair}] isAwaitingSignal:`, isAwaitingSignal);
+  }, [currentPrice, isLoadingPrice, isPriceError, isAwaitingSignal, trade.pair]);
 
   const editForm = useForm<z.infer<typeof editFormSchema>>({
     resolver: zodResolver(editFormSchema),
@@ -165,14 +173,6 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
 
   const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
 
-  console.log(`[ActiveSignalTradeRow] Render for trade ${trade.id} (${trade.pair}):`);
-  console.log(`  status: ${trade.status}`);
-  console.log(`  isAwaitingSignal: ${isAwaitingSignal}`);
-  console.log(`  isLoadingPrice: ${isLoadingPrice}`);
-  console.log(`  currentPrice (from query): ${currentPrice}`);
-  console.log(`  trade.purchase_price: ${trade.purchase_price}`);
-  console.log(`  Calculated PnL: ${pnl}`);
-
   return (
     <TableRow className="border-gray-700">
       <TableCell className="font-medium text-white">{trade.pair}</TableCell>
@@ -183,14 +183,14 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       <TableCell className="text-white">
         {isLoadingPrice ? (
           <Skeleton className="h-4 w-16" />
-        ) : isAwaitingSignal ? (
+        ) : isAwaitingSignal || isPriceError ? (
           'N/A'
         ) : (
           typeof currentPrice === 'number' ? currentPrice.toFixed(4) : 'N/A'
         )}
       </TableCell>
       <TableCell className={pnlColor}>
-        {isAwaitingSignal ? 'N/A' : (typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A')}
+        {isAwaitingSignal || isPriceError ? 'N/A' : (typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A')}
       </TableCell>
       <TableCell className={`font-bold ${
         trade.status === 'active' ? 'text-green-400' : 

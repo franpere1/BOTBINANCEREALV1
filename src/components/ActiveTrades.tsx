@@ -44,7 +44,7 @@ const fetchActiveTrades = async (userId: string, strategyType: 'manual' | 'strat
   return data;
 };
 
-const fetchTickerPrice = async (pair: string) => {
+const fetchTickerPrice = async (pair: string): Promise<number> => {
   console.log(`[fetchTickerPrice] Fetching price for ${pair}`);
   const { data, error } = await supabase.functions.invoke('get-ticker-price', {
     body: { pair },
@@ -55,11 +55,12 @@ const fetchTickerPrice = async (pair: string) => {
     throw new Error(data?.error || error.message || `Failed to fetch ticker price for ${pair}`);
   }
 
-  console.log(`[fetchTickerPrice] Raw data for ${pair}:`, data);
+  console.log(`[fetchTickerPrice] Raw data from Edge Function for ${pair}:`, data);
 
-  if (!data || typeof data.price === 'undefined') {
-    console.warn(`[fetchTickerPrice] No price data or undefined price for ${pair}. Data:`, data);
-    throw new Error(`No price data received for ${pair}`);
+  // Ensure data is an object and has a 'price' property
+  if (!data || typeof data !== 'object' || typeof data.price === 'undefined') {
+    console.warn(`[fetchTickerPrice] Unexpected data structure or missing price for ${pair}. Data:`, data);
+    throw new Error(`Unexpected price data received for ${pair}`);
   }
 
   const price = parseFloat(data.price);
@@ -86,12 +87,19 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
   const isAwaitingDipSignal = trade.status === 'awaiting_dip_signal';
   const isStrategicTrade = trade.strategy_type === 'strategic';
 
-  const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
+  const { data: currentPrice, isLoading: isLoadingPrice, isError: isPriceError } = useQuery<number, Error>({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
     enabled: !isAwaitingDipSignal,
     refetchInterval: 5000,
   });
+
+  React.useEffect(() => {
+    console.log(`[ActiveTradeRow - ${trade.pair}] currentPrice:`, currentPrice);
+    console.log(`[ActiveTradeRow - ${trade.pair}] isLoadingPrice:`, isLoadingPrice);
+    console.log(`[ActiveTradeRow - ${trade.pair}] isPriceError:`, isPriceError);
+    console.log(`[ActiveTradeRow - ${trade.pair}] isAwaitingDipSignal:`, isAwaitingDipSignal);
+  }, [currentPrice, isLoadingPrice, isPriceError, isAwaitingDipSignal, trade.pair]);
 
   const editForm = useForm<z.infer<typeof editStrategicFormSchema>>({
     resolver: zodResolver(editStrategicFormSchema),
@@ -178,14 +186,6 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
 
   const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
 
-  console.log(`[ActiveTradeRow] Render for trade ${trade.id} (${trade.pair}):`);
-  console.log(`  status: ${trade.status}`);
-  console.log(`  isAwaitingDipSignal: ${isAwaitingDipSignal}`);
-  console.log(`  isLoadingPrice: ${isLoadingPrice}`);
-  console.log(`  currentPrice (from query): ${currentPrice}`);
-  console.log(`  trade.purchase_price: ${trade.purchase_price}`);
-  console.log(`  Calculated PnL: ${pnl}`);
-
   return (
     <TableRow className="border-gray-700">
       <TableCell className="font-medium text-white">{trade.pair}</TableCell>
@@ -196,14 +196,14 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       <TableCell className="text-white">
         {isLoadingPrice ? (
           <Skeleton className="h-4 w-16" />
-        ) : isAwaitingDipSignal ? (
+        ) : isAwaitingDipSignal || isPriceError ? (
           'N/A'
         ) : (
           typeof currentPrice === 'number' ? currentPrice.toFixed(4) : 'N/A'
         )}
       </TableCell>
       <TableCell className={pnlColor}>
-        {isAwaitingDipSignal ? 'N/A' : (typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A')}
+        {isAwaitingDipSignal || isPriceError ? 'N/A' : (typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A')}
       </TableCell>
       <TableCell className={`font-bold ${
         isAwaitingDipSignal ? 'text-blue-400' : 'text-green-400'
