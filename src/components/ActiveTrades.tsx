@@ -180,7 +180,8 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
     }
   };
 
-  const pnl = (typeof currentPrice === 'number' && trade.purchase_price !== null)
+  // Calcular PnL de forma segura
+  const pnl = (typeof currentPrice === 'number' && typeof trade.purchase_price === 'number')
     ? ((currentPrice - trade.purchase_price) / trade.purchase_price) * 100
     : 0;
 
@@ -199,11 +200,15 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
         ) : isAwaitingDipSignal || isPriceError ? (
           'N/A'
         ) : (
-          typeof currentPrice === 'number' ? currentPrice.toFixed(4) : 'N/A'
+          // Asegurarse de que currentPrice es un número antes de llamar a toFixed
+          typeof currentPrice === 'number' ? currentPrice.toFixed(4) : (console.error(`[ActiveTradeRow] currentPrice is not a number when expected: ${currentPrice}`), 'N/A')
         )}
       </TableCell>
       <TableCell className={pnlColor}>
-        {isAwaitingDipSignal || isPriceError ? 'N/A' : (typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : 'N/A')}
+        {isAwaitingDipSignal || isPriceError ? 'N/A' : (
+          // Asegurarse de que currentPrice es un número antes de calcular PnL y llamar a toFixed
+          typeof currentPrice === 'number' ? `${pnl.toFixed(2)}%` : (console.error(`[ActiveTradeRow] currentPrice is not a number for PnL when expected: ${currentPrice}`), 'N/A')
+        )}
       </TableCell>
       <TableCell className={`font-bold ${
         isAwaitingDipSignal ? 'text-blue-400' : 'text-green-400'
