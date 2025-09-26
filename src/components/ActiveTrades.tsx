@@ -164,7 +164,13 @@ const ActiveTradeRow = ({ trade }: { trade: Trade }) => {
       <TableCell className="text-yellow-400">{trade.target_price?.toFixed(4) || 'N/A'}</TableCell>
       <TableCell className="text-gray-300">{trade.take_profit_percentage.toFixed(2)}%</TableCell>
       <TableCell className="text-white">
-        {isLoadingPrice || isAwaitingDipSignal ? <Skeleton className="h-4 w-16" /> : currentPrice?.toFixed(4)}
+        {isLoadingPrice ? (
+          <Skeleton className="h-4 w-16" />
+        ) : isAwaitingDipSignal ? (
+          'N/A'
+        ) : (
+          currentPrice?.toFixed(4) || 'N/A'
+        )}
       </TableCell>
       <TableCell className={pnlColor}>{isAwaitingDipSignal ? 'N/A' : `${pnl.toFixed(2)}%`}</TableCell>
       <TableCell className={`font-bold ${

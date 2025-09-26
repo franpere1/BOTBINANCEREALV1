@@ -57,10 +57,12 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const [isActionLoading, setIsActionLoading] = useState(false); // Para el estado de carga del botón de acción
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
+  const isAwaitingSignal = trade.status === 'awaiting_buy_signal';
+
   const { data: currentPrice, isLoading: isLoadingPrice } = useQuery({
     queryKey: ['tickerPrice', trade.pair],
     queryFn: () => fetchTickerPrice(trade.pair),
-    enabled: trade.status !== 'awaiting_buy_signal', // Solo cargar precio si no está esperando señal
+    enabled: !isAwaitingSignal, // Solo cargar precio si no está esperando señal
     refetchInterval: 5000, // Consultar el precio cada 5 segundos
   });
 
@@ -100,7 +102,7 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const handleDeleteOrClose = async () => {
     setIsActionLoading(true);
     try {
-      if (trade.status === 'awaiting_buy_signal') {
+      if (isAwaitingSignal) {
         // Eliminar monitoreo
         const { data, error: functionError } = await supabase.functions.invoke('delete-signal-trade', {
           body: { tradeId: trade.id },
@@ -141,8 +143,6 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
   const pnl = (currentPrice && trade.purchase_price) ? ((currentPrice - trade.purchase_price) / trade.purchase_price) * 100 : 0;
   const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
 
-  const isAwaitingSignal = trade.status === 'awaiting_buy_signal';
-
   return (
     <TableRow className="border-gray-700">
       <TableCell className="font-medium text-white">{trade.pair}</TableCell>
@@ -151,7 +151,13 @@ const ActiveSignalTradeRow = ({ trade }: { trade: SignalTrade }) => {
       <TableCell className="text-yellow-400">{trade.target_price?.toFixed(4) || 'N/A'}</TableCell>
       <TableCell className="text-gray-300">{trade.take_profit_percentage.toFixed(2)}%</TableCell>
       <TableCell className="text-white">
-        {isLoadingPrice || isAwaitingSignal ? <Skeleton className="h-4 w-16" /> : currentPrice?.toFixed(4)}
+        {isLoadingPrice ? (
+          <Skeleton className="h-4 w-16" />
+        ) : isAwaitingSignal ? (
+          'N/A'
+        ) : (
+          currentPrice?.toFixed(4) || 'N/A'
+        )}
       </TableCell>
       <TableCell className={pnlColor}>{isAwaitingSignal ? 'N/A' : `${pnl.toFixed(2)}%`}</TableCell>
       <TableCell className={`font-bold ${
