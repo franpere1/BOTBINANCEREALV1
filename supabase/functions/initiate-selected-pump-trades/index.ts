@@ -189,20 +189,38 @@ serve(async (req) => {
         // Obtener klines de 1h y 5m para el análisis
         const klines1hUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
         const klines1hResponse = await fetch(klines1hUrl);
-        const klines1hData = await klines1hResponse.json();
-        if (!klines1hResponse.ok || klines1hData.code) {
-          throw new Error(`Error fetching 1h klines for ${asset}: ${klines1hData.msg || 'Unknown error'}`);
+        
+        const klines5mUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=5m&limit=100`;
+        const klines5mResponse = await fetch(klines5mUrl);
+        
+        if (!klines1hResponse.ok || !klines5mResponse.ok) {
+          const klines1hData = await klines1hResponse.json();
+          const klines5mData = await klines5mResponse.json();
+          const reason = `Error fetching klines data for ${asset}: ${klines1hData.msg || klines5mData.msg || 'Unknown error'}`;
+          console.warn(`[${functionName}] ${reason}`);
+          await supabaseAdmin
+            .from('signal_trades')
+            .insert({
+              user_id: user.id,
+              pair: asset,
+              usdt_amount: usdtAmount,
+              take_profit_percentage: takeProfitPercentage,
+              status: 'pending',
+              strategy_type: 'pump_five_pairs',
+              error_message: reason,
+              entry_reason: reason,
+            });
+          results.push({ asset, status: 'pending', message: reason });
+          continue;
         }
+
+        const klines1hData = await klines1hResponse.json();
+        const klines5mData = await klines5mResponse.json();
+
         const closes1h = klines1hData.map((k: any) => parseFloat(k[4]));
         const highs1h = klines1hData.map((k: any) => parseFloat(k[2]));
         const volumes1h = klines1hData.map((k: any) => parseFloat(k[5]));
 
-        const klines5mUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=5m&limit=100`;
-        const klines5mResponse = await fetch(klines5mUrl);
-        const klines5mData = await klines5mResponse.json();
-        if (!klines5mResponse.ok || klines5mData.code) {
-          throw new Error(`Error fetching 5m klines for ${asset}: ${klines5mData.msg || 'Unknown error'}`);
-        }
         const closes5m = klines5mData.map((k: any) => parseFloat(k[4]));
         const opens5m = klines5mData.map((k: any) => parseFloat(k[1]));
         const highs5m = klines5mData.map((k: any) => parseFloat(k[2]));
@@ -210,7 +228,7 @@ serve(async (req) => {
         const currentPrice = closes5m[closes5m.length - 1];
 
         if (closes1h.length < 20 || closes5m.length < 20) {
-          const reason = 'No hay suficientes datos de klines para el análisis.';
+          const reason = `No hay suficientes datos de klines (${closes1h.length}h, ${closes5m.length}m) para el análisis de ${asset}.`;
           console.warn(`[${functionName}] ${reason}`);
           await supabaseAdmin
             .from('signal_trades')
@@ -251,7 +269,7 @@ serve(async (req) => {
           signalType = 'BUY';
           entryReason = 'Continuación alcista: RSI 1h < 80, ruptura de resistencia con volumen validado, precio > EMA20 5m.';
         } else {
-          entryReason = `No se cumplen las condiciones de compra: RSI 1h (${rsi1h.toFixed(2)}) ${rsi1h < 80 ? '< 80' : '>= 80'}, Ruptura Resistencia: ${isBreakingResistance}, Volumen Validado: ${isVolumeValidated}, Precio > EMA20 5m: ${currentPrice > ema20_5m}.`;
+          entryReason = `No se cumplen las condiciones de compra: RSI 1h (${rsi1h.toFixed(2)}) ${rsi1h < 80 ? '< 80' : '>= 80'}, Ruptura Resistencia: ${isBreakingResistance}, Volumen Validado: ${isVolumeValidated}, Precio > EMA20 5m: ${currentPrice > ema20_5m.toFixed(4)}.`;
         }
 
         if (signalType === 'BUY') {
@@ -332,7 +350,8 @@ serve(async (req) => {
               take_profit_percentage: takeProfitPercentage,
               status: 'pending', // Establecer estado a pendiente
               strategy_type: 'pump_five_pairs',
-              entry_reason: entryReason, // Almacenar la razón por la que está pendiente
+              error_message: entryReason, // Almacenar la razón por la que está pendiente
+              entry_reason: entryReason, // También set entry_reason
             });
 
           if (insertPendingError) {

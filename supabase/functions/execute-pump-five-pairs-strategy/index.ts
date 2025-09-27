@@ -211,19 +211,34 @@ serve(async (req) => {
           const klines1hUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
           const klines1hResponse = await fetch(klines1hUrl);
           const klines1hData = await klines1hResponse.json();
-          if (!klines1hResponse.ok || klines1hData.code) {
-            throw new Error(`Error fetching 1h klines for ${asset}: ${klines1hData.msg || 'Unknown error'}`);
+          
+          const klines5mUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=5m&limit=100`;
+          const klines5mResponse = await fetch(klines5mUrl);
+          const klines5mData = await klines5mResponse.json();
+
+          if (!klines1hResponse.ok || klines1hData.code || !klines5mResponse.ok || klines5mData.code) {
+            const reason = `Error fetching klines data for ${asset}: ${klines1hData.msg || klines5mData.msg || 'Unknown error'}`;
+            console.warn(`[${functionName}] ${reason}`);
+            await supabaseAdmin
+              .from('signal_trades')
+              .insert({
+                user_id: user_id,
+                pair: asset,
+                usdt_amount: usdt_amount,
+                take_profit_percentage: take_profit_percentage,
+                status: 'pending',
+                strategy_type: 'pump_five_pairs',
+                error_message: reason,
+                entry_reason: reason,
+              });
+            results.push({ userId: user_id, asset, status: 'pending', message: reason });
+            continue;
           }
+
           const closes1h = klines1hData.map((k: any) => parseFloat(k[4]));
           const highs1h = klines1hData.map((k: any) => parseFloat(k[2]));
           const volumes1h = klines1hData.map((k: any) => parseFloat(k[5]));
 
-          const klines5mUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=5m&limit=100`;
-          const klines5mResponse = await fetch(klines5mUrl);
-          const klines5mData = await klines5mResponse.json();
-          if (!klines5mResponse.ok || klines5mData.code) {
-            throw new Error(`Error fetching 5m klines for ${asset}: ${klines5mData.msg || 'Unknown error'}`);
-          }
           const closes5m = klines5mData.map((k: any) => parseFloat(k[4]));
           const opens5m = klines5mData.map((k: any) => parseFloat(k[1]));
           const highs5m = klines5mData.map((k: any) => parseFloat(k[2]));
@@ -231,8 +246,21 @@ serve(async (req) => {
           const currentPrice = closes5m[closes5m.length - 1];
 
           if (closes1h.length < 20 || closes5m.length < 20) {
-            console.warn(`[${functionName}] Not enough klines data for ${asset}. Skipping indicator calculations.`);
-            results.push({ userId: user_id, asset, status: 'skipped', message: 'Not enough klines data.' });
+            const reason = `No hay suficientes datos de klines (${closes1h.length}h, ${closes5m.length}m) para el análisis de ${asset}.`;
+            console.warn(`[${functionName}] ${reason}`);
+            await supabaseAdmin
+              .from('signal_trades')
+              .insert({
+                user_id: user_id,
+                pair: asset,
+                usdt_amount: usdt_amount,
+                take_profit_percentage: take_profit_percentage,
+                status: 'pending',
+                strategy_type: 'pump_five_pairs',
+                error_message: reason,
+                entry_reason: reason,
+              });
+            results.push({ userId: user_id, asset, status: 'pending', message: reason });
             continue;
           }
 
@@ -260,7 +288,7 @@ serve(async (req) => {
             signalType = 'BUY';
             entryReason = 'Continuación alcista: RSI 1h < 80, ruptura de resistencia con volumen validado, precio > EMA20 5m.';
           } else {
-            entryReason = `No se cumplen las condiciones de compra: RSI 1h (${rsi1h.toFixed(2)}) ${rsi1h < 80 ? '< 80' : '>= 80'}, Ruptura Resistencia: ${isBreakingResistance}, Volumen Validado: ${isVolumeValidated}, Precio > EMA20 5m: ${currentPrice > ema20_5m}.`;
+            entryReason = `No se cumplen las condiciones de compra: RSI 1h (${rsi1h.toFixed(2)}) ${rsi1h < 80 ? '< 80' : '>= 80'}, Ruptura Resistencia: ${isBreakingResistance}, Volumen Validado: ${isVolumeValidated}, Precio > EMA20 5m: ${currentPrice > ema20_5m.toFixed(4)}.`;
           }
 
           if (signalType === 'BUY') {
@@ -302,9 +330,7 @@ serve(async (req) => {
             const purchasePrice = cummulativeQuoteQty / executedQty;
             const targetPrice = (purchasePrice * (1 + take_profit_percentage / 100)) / (1 - BINANCE_FEE_RATE);
 
-            // Calcular Stop Loss (ejemplo: 0.5% por debajo del precio de compra o bajo la EMA20)
-            // Para esta estrategia, un SL fijo o basado en la estructura es más adecuado.
-            // Aquí un ejemplo simple: 1% por debajo del precio de compra.
+            // Calcular Stop Loss (ejemplo: 1% por debajo del precio de compra)
             const stopLossPrice = purchasePrice * (1 - 0.01); // 1% de riesgo
 
             // 4. Insertar la operación en la base de datos con estado 'active'
@@ -343,7 +369,8 @@ serve(async (req) => {
                 take_profit_percentage: take_profit_percentage,
                 status: 'pending', // Set status to pending
                 strategy_type: 'pump_five_pairs',
-                entry_reason: entryReason, // Store the reason why it's pending
+                error_message: entryReason, // Store the reason why it's pending
+                entry_reason: entryReason, // Also set entry_reason
               });
 
             if (insertPendingError) {
