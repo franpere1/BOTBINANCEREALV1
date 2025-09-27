@@ -188,11 +188,11 @@ const ActivePumpTradeRow = ({ trade }: { trade: PumpTrade }) => {
       </TableCell>
       <TableCell className={`font-bold ${
         trade.status === 'active' ? 'text-green-400' : 
-        trade.status === 'pending' ? 'text-blue-400' :
+        trade.status === 'pending' ? 'text-blue-400' : // Color azul para 'pending'
         'text-red-400' // 'error'
       }`}>
         {trade.status === 'active' ? 'Activa' : trade.status === 'pending' ? 'Pendiente' : 'Error'}
-        {trade.error_message && (
+        {trade.error_message && ( // Mostrar el mensaje de error/razón de espera
             <div className="flex items-center text-red-400 text-xs mt-1">
               <AlertCircle className="h-3 w-3 mr-1" />
               {trade.error_message}
