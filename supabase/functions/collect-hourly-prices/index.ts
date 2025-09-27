@@ -21,8 +21,34 @@ serve(async (req) => {
 
     console.log(`[${functionName}] Starting hourly price collection.`);
 
-    // Lista ampliada de activos para recolectar, coincidiendo con los usados en get-ml-signals
-    const assetsToCollect = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
+    // Obtener el ID del proyecto de Supabase para construir la URL de la función Edge
+    const SUPABASE_PROJECT_ID = Deno.env.get('SUPABASE_URL')?.split('.')[0].split('//')[1];
+    const getTopPumpPairsUrl = `https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/get-top-pump-pairs`;
+    
+    // Invocar la función Edge 'get-top-pump-pairs' para obtener los activos dinámicos
+    const topPumpPairsResponse = await fetch(getTopPumpPairsUrl, {
+      headers: {
+        // Usar la clave de rol de servicio para la comunicación interna entre funciones Edge
+        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const topPumpPairsData = await topPumpPairsResponse.json();
+
+    let dynamicAssets: string[] = [];
+    if (topPumpPairsResponse.ok && Array.isArray(topPumpPairsData)) {
+      dynamicAssets = topPumpPairsData;
+      console.log(`[${functionName}] Dynamically fetched top pump pairs:`, dynamicAssets);
+    } else {
+      console.error(`[${functionName}] Error fetching top pump pairs: ${topPumpPairsData.error || 'Unknown error'}`, topPumpPairsData);
+      // Si hay un error, dynamicAssets permanecerá vacío y se procederá solo con los activos fijos.
+    }
+
+    // Lista ampliada de activos para recolectar, incluyendo los usados en get-ml-signals y los dinámicos
+    const mlSignalAssets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'TRXUSDT'];
+    const assetsToCollect = Array.from(new Set([...mlSignalAssets, ...dynamicAssets])); // Combinar y eliminar duplicados
+
+    console.log(`[${functionName}] Final list of assets to collect:`, assetsToCollect);
 
     for (const asset of assetsToCollect) {
       try {
