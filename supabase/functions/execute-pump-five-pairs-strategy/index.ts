@@ -187,6 +187,26 @@ serve(async (req) => {
 
       for (const asset of topGainers) {
         try {
+          // Check if there's already an active/pending trade for this asset and user
+          const { data: existingTrade, error: existingTradeError } = await supabaseAdmin
+            .from('signal_trades')
+            .select('id, status')
+            .eq('user_id', user_id)
+            .eq('pair', asset)
+            .eq('strategy_type', 'pump_five_pairs')
+            .in('status', ['active', 'pending'])
+            .single();
+
+          if (existingTradeError && existingTradeError.code !== 'PGRST116') {
+            throw new Error(`Error checking existing trade: ${existingTradeError.message}`);
+          }
+
+          if (existingTrade) {
+            console.log(`[${functionName}] User ${user_id} already has an active/pending 'Pump 5 Pares' trade for ${asset}. Skipping new entry.`);
+            results.push({ userId: user_id, asset, status: 'skipped', message: 'Existing active/pending trade.' });
+            continue; // Skip to the next asset
+          }
+
           // 3. Obtener klines de 1h y 5m para el análisis
           const klines1hUrl = `https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1h&limit=100`;
           const klines1hResponse = await fetch(klines1hUrl);
@@ -239,35 +259,11 @@ serve(async (req) => {
           if (rsi1h < 80 && isBreakingResistance && isVolumeValidated && currentPrice > ema20_5m) {
             signalType = 'BUY';
             entryReason = 'Continuación alcista: RSI 1h < 80, ruptura de resistencia con volumen validado, precio > EMA20 5m.';
+          } else {
+            entryReason = `No se cumplen las condiciones de compra: RSI 1h (${rsi1h.toFixed(2)}) ${rsi1h < 80 ? '< 80' : '>= 80'}, Ruptura Resistencia: ${isBreakingResistance}, Volumen Validado: ${isVolumeValidated}, Precio > EMA20 5m: ${currentPrice > ema20_5m}.`;
           }
-          // Corrección bajista (para spot, esperar retroceso a EMA20 para comprar)
-          // Esta lógica es más compleja para una compra en dip después de un pump,
-          // por ahora nos enfocaremos en la continuación alcista para la estrategia "Pump 5 Pares".
-          // Si el usuario quiere una estrategia de "corrección bajista" para comprar,
-          // sería más similar a la estrategia de "Strategic Purchases" ya implementada.
-          // Por simplicidad y para el contexto de "Pump 5 Pares", nos centraremos en la continuación.
 
           if (signalType === 'BUY') {
-            // Verificar si ya hay una operación activa para este par y usuario
-            const { data: existingTrade, error: existingTradeError } = await supabaseAdmin
-              .from('signal_trades')
-              .select('id, status')
-              .eq('user_id', user_id)
-              .eq('pair', asset)
-              .eq('strategy_type', 'pump_five_pairs')
-              .in('status', ['active', 'pending'])
-              .single();
-
-            if (existingTradeError && existingTradeError.code !== 'PGRST116') {
-              throw new Error(`Error checking existing trade: ${existingTradeError.message}`);
-            }
-
-            if (existingTrade) {
-              console.log(`[${functionName}] User ${user_id} already has an active/pending 'Pump 5 Pares' trade for ${asset}. Skipping new entry.`);
-              results.push({ userId: user_id, asset, status: 'skipped', message: 'Existing active/pending trade.' });
-              continue;
-            }
-
             // Ejecutar la orden de compra en Binance
             const queryString = `symbol=${asset}&side=BUY&type=MARKET&quoteOrderQty=${usdt_amount}&timestamp=${Date.now()}`;
             const signature = new HmacSha256(api_secret).update(queryString).toString();
@@ -293,6 +289,7 @@ serve(async (req) => {
                   status: 'error',
                   strategy_type: 'pump_five_pairs',
                   error_message: `Binance API error: ${orderResult.msg || 'Error desconocido'}`,
+                  entry_reason: entryReason, // Store the reason for the failed entry
                 });
               results.push({ userId: user_id, asset, status: 'error', message: `Binance BUY order failed: ${orderResult.msg || 'Unknown error'}` });
               continue;
@@ -336,8 +333,25 @@ serve(async (req) => {
             results.push({ userId: user_id, asset, status: 'success', message: 'Trade activated.' });
 
           } else {
-            console.log(`[${functionName}] No BUY signal for ${asset} for user ${user_id}. Skipping.`);
-            results.push({ userId: user_id, asset, status: 'skipped', message: 'No BUY signal.' });
+            // If no BUY signal, insert a 'pending' trade to be monitored later
+            const { error: insertPendingError } = await supabaseAdmin
+              .from('signal_trades')
+              .insert({
+                user_id: user_id,
+                pair: asset,
+                usdt_amount: usdt_amount,
+                take_profit_percentage: take_profit_percentage,
+                status: 'pending', // Set status to pending
+                strategy_type: 'pump_five_pairs',
+                entry_reason: entryReason, // Store the reason why it's pending
+              });
+
+            if (insertPendingError) {
+              console.error(`[${functionName}] Error inserting pending trade into DB:`, insertPendingError);
+              throw new Error(`Error al registrar la operación pendiente en DB: ${insertPendingError.message}`);
+            }
+            console.log(`[${functionName}] 'Pump 5 Pares' trade for ${asset} set to 'pending' for user ${user_id}. Reason: ${entryReason}`);
+            results.push({ userId: user_id, asset, status: 'pending', message: `Awaiting BUY signal: ${entryReason}` });
           }
         } catch (assetError: any) {
           console.error(`[${functionName}] Error processing asset ${asset} for user ${user_id}:`, assetError.message);

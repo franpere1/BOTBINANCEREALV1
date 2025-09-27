@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0'; // Corregido: Añadido 'from'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { HmacSha256 } from "https://deno.land/std@0.160.0/hash/sha256.ts";
 
 // Inlined from _utils/binance-helpers.ts
@@ -16,6 +16,69 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Helper function to calculate SMA
+function calculateSMA(data: number[], period: number): number {
+  if (data.length < period) return 0;
+  const sum = data.slice(-period).reduce((acc, val) => acc + val, 0);
+  return sum / period;
+}
+
+// Helper function to calculate a series of EMA values
+function calculateEMASeries(data: number[], period: number): number[] {
+  if (data.length < period) return [];
+  const k = 2 / (period + 1);
+  const emas: number[] = [];
+  let currentEMA = calculateSMA(data.slice(0, period), period); // Initial SMA for the first EMA
+  emas.push(currentEMA);
+
+  for (let i = period; i < data.length; i++) {
+    currentEMA = (data[i] - currentEMA) * k + currentEMA;
+    emas.push(currentEMA);
+  }
+  return emas;
+}
+
+// Helper function to calculate RSI
+function calculateRSI(closes: number[], period: number): number {
+  if (closes.length < period + 1) return 0;
+
+  let gains: number[] = [];
+  let losses: number[] = [];
+
+  for (let i = 1; i < closes.length; i++) {
+    const change = closes[i] - closes[i - 1];
+    if (change > 0) {
+      gains.push(change);
+      losses.push(0);
+    } else {
+      gains.push(0);
+      losses.push(Math.abs(change));
+    }
+  }
+
+  let avgGain = 0;
+  let avgLoss = 0;
+
+  // Initial average for the first 'period'
+  for (let i = 0; i < period; i++) {
+    avgGain += gains[i];
+    avgLoss += losses[i];
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // Smoothed average for the rest
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+  }
+
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -249,28 +312,92 @@ serve(async (req) => {
             console.log(`[${functionName}] Strategic trade ${trade.id} still awaiting DIP signal. Reason: ${finalReason}`);
           }
 
-        } else if (trade.status === 'awaiting_buy_signal') {
-          // Lógica para operaciones esperando señal de compra (ML Signals)
-          console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal.`);
+        } else if (trade.status === 'awaiting_buy_signal' || (trade.status === 'pending' && tradeStrategyType === 'pump_five_pairs')) {
+          // Lógica para operaciones esperando señal de compra (ML Signals y Pump 5 Pares)
+          console.log(`[${functionName}] Trade ${trade.id} (${trade.pair}) is awaiting BUY signal for strategy ${tradeStrategyType}.`);
           
-          // Invocar la función get-ml-signals para obtener la señal
-          const { data: mlSignalData, error: mlSignalError } = await supabaseAdmin.functions.invoke('get-ml-signals', {
-            body: { asset: trade.pair },
-          });
+          let signalType: 'BUY' | 'HOLD' = 'HOLD';
+          let entryReason = '';
+          let currentPrice = 0;
+          let stopLossPrice: number | null = null;
 
-          if (mlSignalError) {
-            console.error(`[${functionName}] Error invoking get-ml-signals for ${trade.pair}:`, mlSignalError);
-            await supabaseAdmin
-              .from(tableName)
-              .update({ status: 'error', error_message: `Error al obtener señal de ML: ${mlSignalError.message}` })
-              .eq('id', trade.id);
-            continue;
+          if (tradeStrategyType === 'ml_signal') {
+            // Invocar la función get-ml-signals para obtener la señal
+            const { data: mlSignalData, error: mlSignalError } = await supabaseAdmin.functions.invoke('get-ml-signals', {
+              body: { asset: trade.pair },
+            });
+
+            if (mlSignalError) {
+              console.error(`[${functionName}] Error invoking get-ml-signals for ${trade.pair}:`, mlSignalError);
+              await supabaseAdmin
+                .from(tableName)
+                .update({ status: 'error', error_message: `Error al obtener señal de ML: ${mlSignalError.message}` })
+                .eq('id', trade.id);
+              continue;
+            }
+            
+            const mlSignal = mlSignalData[0]; // get-ml-signals devuelve un array, tomamos el primero
+            currentPrice = mlSignal.price;
+
+            if (mlSignal.signal === 'BUY' && mlSignal.confidence >= 70) {
+              signalType = 'BUY';
+              entryReason = `Señal de COMPRA de ML detectada con ${mlSignal.confidence.toFixed(1)}% de confianza.`;
+              stopLossPrice = currentPrice * (1 - 0.01); // 1% de riesgo para ML signals
+            } else {
+              entryReason = `No hay señal de COMPRA de ML (>=70% confianza). Señal actual: ${mlSignal.signal}, Confianza: ${mlSignal.confidence.toFixed(1)}%.`;
+            }
+
+          } else if (tradeStrategyType === 'pump_five_pairs') {
+            // Re-evaluar las condiciones de entrada para 'Pump 5 Pares'
+            const klines1hUrl = `https://api.binance.com/api/v3/klines?symbol=${trade.pair}&interval=1h&limit=100`;
+            const klines1hResponse = await fetch(klines1hUrl);
+            const klines1hData = await klines1hResponse.json();
+            if (!klines1hResponse.ok || klines1hData.code) {
+              throw new Error(`Error fetching 1h klines for ${trade.pair}: ${klines1hData.msg || 'Unknown error'}`);
+            }
+            const closes1h = klines1hData.map((k: any) => parseFloat(k[4]));
+            const highs1h = klines1hData.map((k: any) => parseFloat(k[2]));
+            const volumes1h = klines1hData.map((k: any) => parseFloat(k[5]));
+
+            const klines5mUrl = `https://api.binance.com/api/v3/klines?symbol=${trade.pair}&interval=5m&limit=100`;
+            const klines5mResponse = await fetch(klines5mUrl);
+            const klines5mData = await klines5mResponse.json();
+            if (!klines5mResponse.ok || klines5mData.code) {
+              throw new Error(`Error fetching 5m klines for ${trade.pair}: ${klines5mData.msg || 'Unknown error'}`);
+            }
+            const closes5m = klines5mData.map((k: any) => parseFloat(k[4]));
+            const opens5m = klines5mData.map((k: any) => parseFloat(k[1]));
+            const highs5m = klines5mData.map((k: any) => parseFloat(k[2]));
+            const volumes5m = klines5mData.map((k: any) => parseFloat(k[5]));
+            currentPrice = closes5m[closes5m.length - 1];
+
+            if (closes1h.length < 20 || closes5m.length < 20) {
+              entryReason = 'No hay suficientes datos de klines para el análisis.';
+            } else {
+              const rsi1h = calculateRSI(closes1h, 14);
+              const rsi5m = calculateRSI(closes5m, 14);
+              const ema20_5m = calculateEMASeries(closes5m, 20).pop() || 0;
+
+              const lookbackResistance = 24; // 2 horas en velas de 5m
+              const recentHigh = Math.max(...highs5m.slice(-lookbackResistance));
+              const isBreakingResistance = currentPrice > recentHigh;
+
+              const avgVolume5m = calculateSMA(volumes5m, 20);
+              const currentVolume5m = volumes5m[volumes5m.length - 1];
+              const isVolumeValidated = currentVolume5m > (avgVolume5m * 1.5);
+
+              if (rsi1h < 80 && isBreakingResistance && isVolumeValidated && currentPrice > ema20_5m) {
+                signalType = 'BUY';
+                entryReason = 'Continuación alcista: RSI 1h < 80, ruptura de resistencia con volumen validado, precio > EMA20 5m.';
+                stopLossPrice = currentPrice * (1 - 0.01); // 1% de riesgo para Pump 5 Pares
+              } else {
+                entryReason = `No se cumplen las condiciones de compra: RSI 1h (${rsi1h.toFixed(2)}) ${rsi1h < 80 ? '< 80' : '>= 80'}, Ruptura Resistencia: ${isBreakingResistance}, Volumen Validado: ${isVolumeValidated}, Precio > EMA20 5m: ${currentPrice > ema20_5m}.`;
+              }
+            }
           }
-          
-          const mlSignal = mlSignalData[0]; // get-ml-signals devuelve un array, tomamos el primero
 
-          if (mlSignal.signal === 'BUY' && mlSignal.confidence >= 70) {
-            console.log(`[${functionName}] BUY signal detected for ${trade.pair} with ${mlSignal.confidence.toFixed(1)}% confidence. Initiating buy order.`);
+          if (signalType === 'BUY') {
+            console.log(`[${functionName}] BUY signal detected for ${trade.pair} for strategy ${tradeStrategyType}. Initiating buy order.`);
 
             // Obtener información de intercambio para precisión y límites
             const exchangeInfoUrl = `https://api.binance.com/api/v3/exchangeInfo?symbol=${trade.pair}`;
@@ -302,7 +429,7 @@ serve(async (req) => {
               console.error(`[${functionName}] Binance BUY order error for ${trade.pair}: ${orderResult.msg || 'Unknown error'}`, orderResult);
               await supabaseAdmin
                 .from(tableName)
-                .update({ status: 'error', error_message: `Error de Binance al comprar: ${orderResult.msg || 'Error desconocido'}` })
+                .update({ status: 'error', error_message: `Error de Binance al comprar: ${orderResult.msg || 'Error desconocido'}`, entry_reason: entryReason })
                 .eq('id', trade.id);
               continue;
             }
@@ -322,8 +449,11 @@ serve(async (req) => {
                 asset_amount: executedQty,
                 purchase_price: purchasePrice,
                 target_price: targetPrice,
+                stop_loss_price: stopLossPrice, // Set SL here
                 binance_order_id_buy: orderResult.orderId.toString(),
                 created_at: new Date().toISOString(), // Set creation time when it becomes active
+                error_message: null, // Clear any previous error message
+                entry_reason: entryReason, // Store the reason for successful entry
               })
               .eq('id', trade.id);
 
@@ -334,7 +464,12 @@ serve(async (req) => {
             console.log(`[${functionName}] Trade ${trade.id} activated and buy order placed successfully.`);
 
           } else {
-            console.log(`[${functionName}] No BUY signal (>=70% confidence) for ${trade.pair}. Current signal: ${mlSignal.signal}, Confidence: ${mlSignal.confidence.toFixed(1)}%. Continuing to await.`);
+            console.log(`[${functionName}] No BUY signal for ${trade.pair} for strategy ${tradeStrategyType}. Current reason: ${entryReason}. Continuing to await.`);
+            // Update the entry_reason in the DB if it changed
+            await supabaseAdmin
+              .from(tableName)
+              .update({ entry_reason: entryReason })
+              .eq('id', trade.id);
           }
 
         } else if (trade.status === 'active') {
