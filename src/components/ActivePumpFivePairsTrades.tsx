@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/context/AuthProvider';
+import { useAuth } from '@/context/AuthProvider/index'; // Corregir la importación de AuthProvider
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -38,7 +38,14 @@ const fetchActivePumpTrades = async (userId: string) => {
     .eq('strategy_type', 'pump_five_pairs') // Filtrar por el nuevo strategy_type
     .in('status', ['active', 'pending']) // 'pending' si está esperando condiciones de entrada
     .order('created_at', { ascending: false });
-  if (error) throw new Error(error.message);
+
+  if (error) {
+    // Si no se encontraron filas, tratar como datos vacíos, no como un error real
+    if (error.code === 'PGRST116') {
+      return [];
+    }
+    throw new Error(error.message);
+  }
   return data;
 };
 
@@ -293,6 +300,7 @@ const ActivePumpFivePairsTrades = () => {
     );
   }
 
+  // Si hay un error real (no PGRST116), mostrar el mensaje de error
   if (isError) {
     return (
       <div className="flex items-center p-4 bg-red-900/50 rounded-md border border-red-700">
@@ -305,6 +313,7 @@ const ActivePumpFivePairsTrades = () => {
     );
   }
 
+  // Si no hay trades (y no hubo un error real), mostrar el mensaje de "no hay operaciones"
   if (!trades || trades.length === 0) {
     return <p className="text-center text-gray-400">No tienes operaciones de 'Pump 5 Pares' activas o pendientes en este momento.</p>;
   }
