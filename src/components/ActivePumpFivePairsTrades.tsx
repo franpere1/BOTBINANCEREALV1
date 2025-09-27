@@ -31,6 +31,7 @@ interface PumpTrade {
 }
 
 const fetchActivePumpTrades = async (userId: string) => {
+  console.log(`[fetchActivePumpTrades] Fetching for userId: ${userId}, strategy_type: 'pump_five_pairs'`); // ADDED LOG
   const { data, error } = await supabase
     .from('signal_trades') // Reutilizamos signal_trades
     .select('*')
@@ -42,10 +43,13 @@ const fetchActivePumpTrades = async (userId: string) => {
   if (error) {
     // Si no se encontraron filas, tratar como datos vacíos, no como un error real
     if (error.code === 'PGRST116') {
+      console.log(`[fetchActivePumpTrades] No rows found for userId: ${userId}, strategy_type: 'pump_five_pairs'`); // ADDED LOG
       return [];
     }
+    console.error(`[fetchActivePumpTrades] Error:`, error); // ADDED LOG
     throw new Error(error.message);
   }
+  console.log(`[fetchActivePumpTrades] Data received:`, data); // ADDED LOG
   return data;
 };
 
@@ -290,6 +294,16 @@ const ActivePumpFivePairsTrades = () => {
     enabled: !!user,
     refetchInterval: 10000,
   });
+
+  // ADDED EFFECT FOR LOGGING
+  React.useEffect(() => {
+    if (trades) {
+      console.log(`[ActivePumpFivePairsTrades] Rendered with trades:`, trades);
+    }
+    if (isError) {
+      console.error(`[ActivePumpFivePairsTrades] Rendered with error:`, error);
+    }
+  }, [trades, isError, error]);
 
   if (isLoading) {
     return (
