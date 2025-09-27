@@ -80,7 +80,7 @@ const PumpFivePairs = () => {
         <CardHeader>
           <CardTitle className="text-yellow-400 text-2xl">Operaciones Activas (Pump 5 Pares)</CardTitle>
           <CardDescription className="text-gray-400">
-            Operaciones iniciadas por la estrategia 'Pump 5 Pares' que están esperando alcanzar su objetivo.
+            Operaciones iniciadas por la estrategia 'Pump 5 Pares' que están activas o pendientes de entrada, esperando alcanzar su objetivo.
           </CardDescription>
         </CardHeader>
         <CardContent>
