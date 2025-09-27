@@ -6,6 +6,7 @@ import { Rocket } from 'lucide-react';
 import PumpFivePairsConfigForm from '@/components/PumpFivePairsConfigForm';
 import ActivePumpFivePairsTrades from '@/components/ActivePumpFivePairsTrades';
 import HourlyPriceMonitor from '@/components/HourlyPriceMonitor';
+import PumpFivePairsInitiatorForm from '@/components/PumpFivePairsInitiatorForm'; // Importar el nuevo componente
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -59,6 +60,21 @@ const PumpFivePairs = () => {
           <PumpFivePairsConfigForm />
         </CardContent>
       </Card>
+
+      {/* Nuevo formulario para iniciar operaciones manualmente */}
+      {isLoadingTopPairs ? (
+        <Card className="w-full bg-gray-800 border-gray-700">
+          <CardHeader>
+            <Skeleton className="h-8 w-3/4" />
+            <Skeleton className="h-4 w-full mt-2" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-40 w-full" />
+          </CardContent>
+        </Card>
+      ) : (
+        <PumpFivePairsInitiatorForm topPumpPairs={topPumpPairs || []} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {isLoadingTopPairs ? (
