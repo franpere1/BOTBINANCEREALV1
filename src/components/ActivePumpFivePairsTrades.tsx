@@ -14,7 +14,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod'; // Corregido: de '*s z' a '* as z'
+import * as z from 'zod';
 
 interface PumpTrade {
   id: string;
@@ -284,7 +284,7 @@ const ActivePumpTradeRow = ({ trade }: { trade: PumpTrade }) => {
 
 const ActivePumpFivePairsTrades = () => {
   const { user } = useAuth();
-  const { data: trades, isLoading, isError } = useQuery({
+  const { data: trades, isLoading, isError, error } = useQuery({
     queryKey: ['activePumpTrades'],
     queryFn: () => fetchActivePumpTrades(user!.id),
     enabled: !!user,
@@ -300,14 +300,22 @@ const ActivePumpFivePairsTrades = () => {
     );
   }
 
-  // Si hay un error real (no PGRST116), mostrar el mensaje de error
+  // Manejo de errores: si es un error de "no filas", mostrar el mensaje de no operaciones.
+  // De lo contrario, mostrar la tarjeta de error.
   if (isError) {
+    const errorMessage = error?.message || "Error desconocido.";
+    const isNoRowsFoundError = errorMessage.includes('PGRST116') || errorMessage.includes('no rows found') || errorMessage.includes('No data');
+
+    if (isNoRowsFoundError) {
+      return <p className="text-center text-gray-400">No tienes operaciones de 'Pump 5 Pares' activas o pendientes en este momento.</p>;
+    }
+
     return (
       <div className="flex items-center p-4 bg-red-900/50 rounded-md border border-red-700">
         <AlertCircle className="h-6 w-6 text-red-400 mr-4 flex-shrink-0" />
         <div>
           <h4 className="font-bold text-red-300">Error</h4>
-          <p className="text-sm text-red-400 mt-1">Error al cargar las operaciones de 'Pump 5 Pares' activas.</p>
+          <p className="text-sm text-red-400 mt-1">Error al cargar las operaciones de 'Pump 5 Pares' activas: {errorMessage}</p>
         </div>
       </div>
     );
