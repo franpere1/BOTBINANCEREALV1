@@ -156,6 +156,35 @@ serve(async (req) => {
       }
       const { api_key, api_secret } = keys;
 
+      // --- NUEVA LÓGICA: Eliminar operaciones pendientes si el par ya no está en topGainers ---
+      const { data: pendingTrades, error: pendingTradesError } = await supabaseAdmin
+        .from('signal_trades')
+        .select('id, pair')
+        .eq('user_id', user_id)
+        .eq('strategy_type', 'pump_five_pairs')
+        .eq('status', 'pending');
+
+      if (pendingTradesError) {
+        console.error(`[${functionName}] Error fetching pending trades for user ${user_id}:`, pendingTradesError);
+        // No lanzamos error fatal, solo registramos y continuamos
+      } else if (pendingTrades && pendingTrades.length > 0) {
+        for (const pendingTrade of pendingTrades) {
+          if (!topGainers.includes(pendingTrade.pair)) {
+            console.log(`[${functionName}] Deleting pending trade ${pendingTrade.id} for ${pendingTrade.pair} (no longer a top gainer).`);
+            const { error: deleteError } = await supabaseAdmin
+              .from('signal_trades')
+              .delete()
+              .eq('id', pendingTrade.id);
+            if (deleteError) {
+              console.error(`[${functionName}] Error deleting pending trade ${pendingTrade.id}:`, deleteError);
+            } else {
+              results.push({ userId: user_id, asset: pendingTrade.pair, status: 'deleted', message: 'Pending trade deleted (no longer top gainer).' });
+            }
+          }
+        }
+      }
+      // --- FIN NUEVA LÓGICA ---
+
       // Verificar saldo USDT antes de cualquier operación
       const timestamp = Date.now();
       const accountQueryString = `timestamp=${timestamp}`;
