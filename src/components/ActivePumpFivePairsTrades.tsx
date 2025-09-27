@@ -31,25 +31,25 @@ interface PumpTrade {
 }
 
 const fetchActivePumpTrades = async (userId: string) => {
-  console.log(`[fetchActivePumpTrades] Fetching for userId: ${userId}, strategy_type: 'pump_five_pairs'`); // ADDED LOG
+  console.log(`[fetchActivePumpTrades] Fetching ALL signal_trades for userId: ${userId} (simplified query)`); // UPDATED LOG
   const { data, error } = await supabase
     .from('signal_trades') // Reutilizamos signal_trades
     .select('*')
     .eq('user_id', userId)
-    .eq('strategy_type', 'pump_five_pairs') // Filtrar por el nuevo strategy_type
+    // .eq('strategy_type', 'pump_five_pairs') // TEMPORARILY REMOVED FOR DEBUGGING
     .in('status', ['active', 'pending']) // 'pending' si está esperando condiciones de entrada
     .order('created_at', { ascending: false });
 
   if (error) {
+    console.error(`[fetchActivePumpTrades] Supabase query error (simplified):`, error); // UPDATED LOG
     // Si no se encontraron filas, tratar como datos vacíos, no como un error real
     if (error.code === 'PGRST116') {
-      console.log(`[fetchActivePumpTrades] No rows found for userId: ${userId}, strategy_type: 'pump_five_pairs'`); // ADDED LOG
+      console.log(`[fetchActivePumpTrades] No rows found (simplified) for userId: ${userId}`); // UPDATED LOG
       return [];
     }
-    console.error(`[fetchActivePumpTrades] Error:`, error); // ADDED LOG
     throw new Error(error.message);
   }
-  console.log(`[fetchActivePumpTrades] Data received:`, data); // ADDED LOG
+  console.log(`[fetchActivePumpTrades] Data received (simplified):`, data); // UPDATED LOG
   return data;
 };
 
